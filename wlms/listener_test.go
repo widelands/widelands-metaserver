@@ -1,4 +1,4 @@
-package wlmslib
+package main
 
 import (
 	"bytes"
@@ -49,25 +49,23 @@ func (tr *TestReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// Testing readPacket {{{
 func (s *ConnectionSuite) TestReadSimplePacket(c *C) {
-	fmt.Printf("hello world\n")
 	con := NewConnection(NewReader("\x00\x06aaaa"))
 	p, err := con.readPacket()
 	c.Assert(err, Equals, nil)
 	testPacket(c, p, []string{"aaaa"})
 }
+
 func (s *ConnectionSuite) TestReadSimplePacket1(c *C) {
 	con := NewConnection(NewReader("\x00\x0faaaa\x00bbb\x00cc\x00d"))
 	p, err := con.readPacket()
 	c.Assert(err, Equals, nil)
 	testPacket(c, p, []string{"aaaa", "bbb", "cc", "d"})
 }
+
 func (s *ConnectionSuite) TestReadPacketTooShortTimingOut(c *C) {
 	con := NewConnection(NewReader("\xff"))
 	p, err := con.readPacket()
-	c.Assert(err, Equals, nil)
-	testPacket(c, p, []string{"aaaa", "bbb", "cc", "d"})
+	c.Assert(err, Not(Equals), nil)
+	testPacket(c, p, []string{})
 }
-
-// End of Testing readPacket }}}

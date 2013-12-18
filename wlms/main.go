@@ -1,10 +1,8 @@
 package main
 
-import "launchpad.net/wlmetaserver/wlmslib"
-
 func main() {
-	rc := wlmslib.CreateRemoteControl()
-	listener := wlmslib.CreateListener()
+	rc := CreateRemoteControl()
+	listener := CreateListener()
 
 	for done := false; !done; {
 		select {

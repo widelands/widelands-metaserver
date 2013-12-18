@@ -1,4 +1,4 @@
-package wlmslib
+package main
 
 import (
 	"log"
