@@ -1,15 +1,13 @@
 package main
 
-func main() {
-	rc := CreateRemoteControl()
-	listener := CreateListener()
+import (
+	"os"
+)
 
-	for done := false; !done; {
-		select {
-		case <-rc.Quit:
-			listener.Quit <- true // TODO(sirver): this value is not really handled
-			done = true
-		}
+func main() {
+	s := CreateServer()
+
+	if err := s.runListeningLoop(); err != nil {
+		os.Exit(1)
 	}
-	println("Exiting!")
 }
