@@ -33,6 +33,16 @@ func NewClient(r net.Conn) *Client {
 	return client
 }
 
+func (client *Client) Disconnect() error {
+	log.Printf("In Disconnect\n")
+	client.conn.Close()
+	if client.DataStream != nil {
+		close(client.DataStream)
+		client.DataStream = nil
+	}
+	return nil
+}
+
 func (client *Client) readingLoop() {
 	log.Print("Starting Goroutine: readingLoop")
 	for {
@@ -46,7 +56,7 @@ func (client *Client) readingLoop() {
 			client.DataStream <- s
 		}
 	}
-	client.conn.Close()
+	client.Disconnect()
 	log.Print("Ending Goroutine: readingLoop")
 }
 
