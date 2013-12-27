@@ -17,7 +17,12 @@ func (p *Packet) ReadInt() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return strconv.Atoi(d)
+	i, err := strconv.Atoi(d)
+	log.Printf("d: %v, i: %v\n", d, i)
+	if err != nil {
+		return 0, fmt.Errorf("Invalid integer: '%s'", d)
+	}
+	return i, nil
 }
 
 func (
@@ -32,7 +37,7 @@ func (
 	case "1", "true":
 		return true, nil
 	default:
-		return false, fmt.Errorf("Illegal argument for bool: %v.", d)
+		return false, fmt.Errorf("Invalid bool: '%s'", d)
 	}
 }
 
@@ -77,10 +82,6 @@ func ReadPacket(r io.Reader) (*Packet, error) {
 	}
 	returnValue := strings.Split(str, "\x00")
 	return &Packet{returnValue[:len(returnValue)-1]}, nil
-}
-
-func (client *Client) SendPacket(data ...interface{}) {
-	client.conn.Write(BuildPacket(data...))
 }
 
 func BuildPacket(data ...interface{}) []byte {

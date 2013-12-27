@@ -7,28 +7,65 @@ import (
 )
 
 // NOCOM(sirver): think about these again
-const (
-	anonymous_user = iota
-	registered_user
-)
+type Permissions int
 
 const (
-	just_connected = iota
-	online
+	UNREGISTERED Permissions = iota
+	REGISTERED
+	SUPERUSER
+)
+
+func (p Permissions) String() string {
+	switch p {
+	case UNREGISTERED:
+		return "UNREGISTERED"
+	case REGISTERED:
+		return "REGISTERED"
+	case SUPERUSER:
+		return "SUPERUSER"
+	default:
+		log.Fatalf("Unknown Permissions: %v", p)
+	}
+	// Never here
+	return ""
+}
+
+type State int
+
+const (
+	HANDSHAKE State = iota
+	CONNECTED
+	DISCONNECTED
 )
 
 type Client struct {
 	conn       net.Conn
 	DataStream chan *Packet
 
-	name      string
-	loginTime time.Time
+	state       State
+	permissions Permissions
+	name        string
+	loginTime   time.Time
 }
 
 func NewClient(r net.Conn) *Client {
-	client := &Client{conn: r, DataStream: make(chan *Packet)}
+	client := &Client{conn: r, DataStream: make(chan *Packet), state: HANDSHAKE, permissions: UNREGISTERED}
 	go client.readingLoop()
 	return client
+}
+
+func (c Client) Permissions() Permissions {
+	return c.permissions
+}
+func (c *Client) SetPermissions(v Permissions) {
+	c.permissions = v
+}
+
+func (c Client) State() State {
+	return c.state
+}
+func (c *Client) SetState(s State) {
+	c.state = s
 }
 
 func (client *Client) Disconnect() error {
@@ -39,6 +76,11 @@ func (client *Client) Disconnect() error {
 		client.DataStream = nil
 	}
 	return nil
+}
+
+func (client *Client) SendPacket(data ...interface{}) {
+	log.Printf("Sending to %s: %v\n", client.name, data)
+	client.conn.Write(BuildPacket(data...))
 }
 
 func (client *Client) readingLoop() {
