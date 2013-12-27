@@ -103,20 +103,26 @@ func (s *Server) dealWithClient(client *Client) {
 			timeout_channel <- true
 		})
 		select {
-		case data, ok := <-client.DataStream:
+		case pkg, ok := <-client.DataStream:
 			if !ok {
 				done = true
 			} else {
 				// TODO(sirver): this should probably use some kind of map
 				waitingForPong = false
 				startToPingTimer.Reset(s.pingCycleTime)
-				switch data {
+				cmdName, err := pkg.ReadString()
+				if err != nil {
+					log.Printf("ReadString returned an error: %v", err)
+					done = true
+				}
+				switch cmdName {
 				case "LOGIN":
-					s.handleLOGIN(client)
+					s.handleLOGIN(client, pkg)
 				case "PONG":
 					// do nothing
 				default:
-					fmt.Printf("Unsupported command %v\n", data)
+					fmt.Printf("Unsupported command %v\n", cmdName)
+					// NOCOM(sirver): should signal an error here
 					break
 				}
 			}
@@ -141,13 +147,13 @@ func (s *Server) dealWithClient(client *Client) {
 	s.disconnectingClients <- client
 }
 
-func (s *Server) handleLOGIN(client *Client) {
+func (s *Server) handleLOGIN(client *Client, pkg *Packet) {
 	// NOCOM(sirver): the data stream needs another abstraction
 	// // TODO(sirver): error handling
-	protocolVersion, _ := client.ExpectInt()
-	userName, _ := client.ExpectString()
-	buildId, _ := client.ExpectString()
-	isRegisteredOnServer, _ := client.ExpectBool()
+	protocolVersion, _ := pkg.ReadInt()
+	userName, _ := pkg.ReadString()
+	buildId, _ := pkg.ReadString()
+	isRegisteredOnServer, _ := pkg.ReadBool()
 	fmt.Printf("protocolVersion: %v, userName: %v, buildId: %v, isRegisteredOnServer: %v\n", protocolVersion, userName, buildId, isRegisteredOnServer)
 
 	client.SendPacket("LOGIN", userName, "UNREGISTERED")

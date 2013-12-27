@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net"
-	"strconv"
 	"time"
 )
 
@@ -21,14 +19,14 @@ const (
 
 type Client struct {
 	conn       net.Conn
-	DataStream chan string
+	DataStream chan *Packet
 
 	name      string
 	loginTime time.Time
 }
 
 func NewClient(r net.Conn) *Client {
-	client := &Client{conn: r, DataStream: make(chan string)}
+	client := &Client{conn: r, DataStream: make(chan *Packet)}
 	go client.readingLoop()
 	return client
 }
@@ -52,9 +50,7 @@ func (client *Client) readingLoop() {
 			log.Printf("err: %v\n", err)
 			break
 		}
-		for _, s := range pkg {
-			client.DataStream <- s
-		}
+		client.DataStream <- pkg
 	}
 	client.Disconnect()
 	log.Print("Ending Goroutine: readingLoop")
@@ -72,24 +68,4 @@ func (client *Client) LoginTime() time.Time {
 }
 func (client *Client) SetLoginTime(loginTime time.Time) {
 	client.loginTime = loginTime
-}
-
-func (client *Client) ExpectInt() (int, error) {
-	return strconv.Atoi(<-client.DataStream)
-}
-
-func (client *Client) ExpectBool() (bool, error) {
-	d := <-client.DataStream
-	switch d {
-	case "0", "false":
-		return false, nil
-	case "1", "true":
-		return true, nil
-	default:
-		return false, fmt.Errorf("Illegal argument for bool: %v.", d)
-	}
-}
-
-func (client *Client) ExpectString() (string, error) {
-	return <-client.DataStream, nil
 }

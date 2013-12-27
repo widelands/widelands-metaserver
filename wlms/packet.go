@@ -1,11 +1,49 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"strconv"
 	"strings"
 )
+
+type Packet struct {
+	data []string
+}
+
+func (p *Packet) ReadInt() (int, error) {
+	d, err := p.ReadString()
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(d)
+}
+
+func (
+	p *Packet) ReadBool() (bool, error) {
+	d, err := p.ReadString()
+	if err != nil {
+		return false, err
+	}
+	switch d {
+	case "0", "false":
+		return false, nil
+	case "1", "true":
+		return true, nil
+	default:
+		return false, fmt.Errorf("Illegal argument for bool: %v.", d)
+	}
+}
+
+func (p *Packet) ReadString() (string, error) {
+	if len(p.data) == 0 {
+		return "", fmt.Errorf("No more data in the packet.")
+	}
+	d := p.data[0]
+	p.data = p.data[1:]
+	return d, nil
+}
 
 func readInt(r io.Reader) (int, error) {
 	buf := make([]byte, 2)
@@ -28,17 +66,17 @@ func readString(r io.Reader, nlen int) (string, error) {
 	return string(buf), nil
 }
 
-func ReadPacket(r io.Reader) ([]string, error) {
+func ReadPacket(r io.Reader) (*Packet, error) {
 	nlen, err := readInt(r)
 	if err != nil {
-		return []string{}, err
+		return nil, err
 	}
 	str, err := readString(r, nlen-2)
 	if err != nil {
-		return []string{}, err
+		return nil, err
 	}
 	returnValue := strings.Split(str, "\x00")
-	return returnValue[:len(returnValue)-1], nil
+	return &Packet{returnValue[:len(returnValue)-1]}, nil
 }
 
 func (client *Client) SendPacket(data ...interface{}) {

@@ -25,16 +25,17 @@ func SendPacket(f test_utils.FakeConn, data ...interface{}) {
 
 func ExpectPacket(c *C, f test_utils.FakeConn, expected ...interface{}) {
 	packet, err := ReadPacket(f.ServerReader())
+	log.Printf("packet: %v\n", packet)
 	c.Assert(err, Equals, nil)
-	c.Check(len(packet), Equals, len(expected))
-	for i := 0; i < len(packet); i += 1 {
+	c.Check(len(packet.data), Equals, len(expected))
+	for i := 0; i < len(packet.data); i += 1 {
 		switch expected[i].(type) {
 		case Matching:
-			c.Check(packet[i], Matches,
+			c.Check(packet.data[i], Matches,
 				expected[i].(Matching).String)
 			continue
 		default:
-			c.Check(packet[i], Equals, expected[i])
+			c.Check(packet.data[i], Equals, expected[i])
 		}
 	}
 }
