@@ -1,10 +1,10 @@
 package main
 
 import (
+	"io"
 	. "launchpad.net/gocheck"
 	"launchpad.net/wlmetaserver/wlms/packet"
 	"log"
-	"net"
 	"testing"
 	"time"
 )
@@ -41,7 +41,7 @@ func SetupServer(c *C, nClients int) (*Server, []FakeConn) {
 	db.AddUser("SirVer", "123456", SUPERUSER)
 	db.AddUser("otto", "ottoiscool", REGISTERED)
 
-	acceptingConnections := make(chan net.Conn, 20)
+	acceptingConnections := make(chan io.ReadWriteCloser, 20)
 	cons := make([]FakeConn, nClients)
 	for i := range cons {
 		cons[i] = NewFakeConn(c)

@@ -4,9 +4,7 @@ import (
 	"io"
 	. "launchpad.net/gocheck"
 	"launchpad.net/wlmetaserver/wlms/packet"
-	"log"
 	"net"
-	"time"
 )
 
 type FakeAddr struct{}
@@ -80,17 +78,4 @@ func (f FakeConn) LocalAddr() net.Addr {
 }
 func (f FakeConn) RemoteAddr() net.Addr {
 	return FakeAddr{}
-}
-func (f FakeConn) SetDeadline(t time.Time) error {
-	log.Print("Setting deadline %v", t)
-	// NOCOM(sirver): implement
-	return nil
-}
-func (f FakeConn) SetReadDeadline(t time.Time) error {
-	// NOCOM(sirver): implement
-	return nil
-}
-func (f FakeConn) SetWriteDeadline(t time.Time) error {
-	// NOCOM(sirver): implement
-	return nil
 }

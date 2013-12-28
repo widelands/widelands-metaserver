@@ -3,15 +3,17 @@ package main
 import (
 	"container/list"
 	"fmt"
+	"io"
 	"launchpad.net/wlmetaserver/wlms/packet"
 	"log"
 	"net"
+	"reflect"
 	"strings"
 	"time"
 )
 
 type Server struct {
-	acceptedConnections chan net.Conn
+	acceptedConnections chan io.ReadWriteCloser
 	shutdownServer      chan bool
 	serverHasShutdown   chan bool
 	clients             *list.List
@@ -43,8 +45,31 @@ func (s *Server) SetPingCycleTime(d time.Duration) {
 	s.pingCycleTime = d
 }
 
+func (s *Server) isLoggedIn(name string) *Client {
+	for e := s.clients.Front(); e != nil; e = e.Next() {
+		client := e.Value.(*Client)
+		if client.Name() == name {
+			return client
+		}
+	}
+	return nil
+}
+
 func (s *Server) mainLoop() error {
-	<-s.shutdownServer
+	log.Print("Starting Goroutine: mainLoop")
+	for done := false; !done; {
+		select {
+		case conn, ok := <-s.acceptedConnections:
+			if !ok {
+				done = true
+			} else {
+				go s.dealWithClient(NewClient(conn))
+			}
+		case <-s.shutdownServer:
+			done = true
+		}
+	}
+	log.Print("Ending Goroutine: mainLoop")
 	s.shutdown()
 	return nil
 }
@@ -58,33 +83,6 @@ func (s *Server) shutdown() error {
 	close(s.acceptedConnections)
 	s.serverHasShutdown <- true
 	return nil
-}
-
-// NOCOM(sirver): I think accept loop is no longer needed. Use main loop?
-func (s *Server) acceptLoop() {
-	log.Print("Starting Goroutine: acceptLoop")
-	for {
-		conn, ok := <-s.acceptedConnections
-		if !ok {
-			break
-		}
-		go s.dealWithClient(NewClient(conn))
-	}
-	log.Print("Ending Goroutine: acceptLoop")
-}
-
-type handlerFunction func(client *Client, packet *packet.Packet) (string, bool)
-
-func (s *Server) dealWithPacket(cmdName string, hf handlerFunction, client *Client, packet *packet.Packet) bool {
-	errString, disconnect := hf(client, packet)
-	if errString != "" {
-		client.SendPacket("ERROR", cmdName, errString)
-	}
-	if disconnect {
-		client.Disconnect()
-		return true
-	}
-	return false
 }
 
 func (s *Server) dealWithClient(client *Client) {
@@ -101,56 +99,48 @@ func (s *Server) dealWithClient(client *Client) {
 		case pkg, ok := <-client.DataStream:
 			if !ok {
 				done = true
+				break
+			}
+			waitingForPong = false
+			startToPingTimer.Reset(s.pingCycleTime)
+
+			cmdName, err := pkg.ReadString()
+			if err != nil {
+				done = true
+				break
+			}
+
+			handlerFunc := reflect.ValueOf(s).MethodByName(strings.Join([]string{"Handle", cmdName}, ""))
+			if handlerFunc.IsValid() {
+				handlerFunc := handlerFunc.Interface().(func(*Client, *packet.Packet) (string, bool))
+				errString := ""
+				errString, done = handlerFunc(client, pkg)
+				if errString != "" {
+					client.SendPacket("ERROR", cmdName, errString)
+				}
 			} else {
-				// TODO(sirver): this should probably use some kind of map
-				waitingForPong = false
-				startToPingTimer.Reset(s.pingCycleTime)
-				cmdName, err := pkg.ReadString()
-				if err != nil {
-					log.Printf("ReadString returned an error: %v", err)
-					done = true
-				}
-				switch cmdName {
-				case "CHAT":
-					done = s.dealWithPacket(cmdName, s.handleCHAT, client, pkg)
-				case "LOGIN":
-					done = s.dealWithPacket(cmdName, s.handleLOGIN, client, pkg)
-				case "MOTD":
-					done = s.dealWithPacket(cmdName, s.handleMOTD, client, pkg)
-				case "DISCONNECT":
-					reason, _ := pkg.ReadString()
-					log.Printf("%s has disconnected with reason %s.", client.Name(), reason)
-					client.Disconnect()
-					done = true
-				case "PONG", "CLIENTS", "GAMES":
-					// do nothing
-				default:
-					log.Printf("%s: Garbage packet %s", client.Name(), cmdName)
-					client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
-					client.Disconnect()
-					done = true
-				}
+				log.Printf("%s: Garbage packet %s", client.Name(), cmdName)
+				client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
+				client.Disconnect()
+				done = true
 			}
 		case <-timeout_channel:
-			// NOCOM(sirver): refactor into method
 			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
-			client.Disconnect()
 			done = true
 		case <-startToPingTimer.C:
 			if waitingForPong {
-				// NOCOM(sirver): refactor into method
 				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
-				client.Disconnect()
 				done = true
+				break
 			}
 			client.SendPacket("PING")
 			waitingForPong = true
 			startToPingTimer.Reset(s.pingCycleTime)
 		}
 	}
+	client.Disconnect()
 	log.Print("Ending Goroutine: dealWithClient")
 
-	// NOCOM(sirver): this would actually need a mutex.
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client) == client {
 			s.clients.Remove(e)
@@ -159,7 +149,7 @@ func (s *Server) dealWithClient(client *Client) {
 	s.broadcastToConnectedClients("CLIENTS_UPDATE")
 }
 
-func (s *Server) handleCHAT(client *Client, pkg *packet.Packet) (string, bool) {
+func (s *Server) HandleCHAT(client *Client, pkg *packet.Packet) (string, bool) {
 	message, err := pkg.ReadString()
 	if err != nil {
 		return err.Error(), false
@@ -183,17 +173,7 @@ func (s *Server) handleCHAT(client *Client, pkg *packet.Packet) (string, bool) {
 	return "", false
 }
 
-func (s *Server) isLoggedIn(name string) *Client {
-	for e := s.clients.Front(); e != nil; e = e.Next() {
-		client := e.Value.(*Client)
-		if client.Name() == name {
-			return client
-		}
-	}
-	return nil
-}
-
-func (s *Server) handleMOTD(client *Client, pkg *packet.Packet) (string, bool) {
+func (s *Server) HandleMOTD(client *Client, pkg *packet.Packet) (string, bool) {
 	message, err := pkg.ReadString()
 	if err != nil {
 		return err.Error(), false
@@ -208,7 +188,20 @@ func (s *Server) handleMOTD(client *Client, pkg *packet.Packet) (string, bool) {
 	return "", false
 }
 
-func (s *Server) handleLOGIN(client *Client, pkg *packet.Packet) (string, bool) {
+func (s *Server) HandleDISCONNECT(client *Client, pkg *packet.Packet) (string, bool) {
+	reason, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), true
+	}
+	log.Printf("%s: leaving. Reason: '%s'", client.Name(), reason)
+	return "", true
+}
+
+func (s *Server) HandlePONG(client *Client, pkg *packet.Packet) (string, bool) {
+	return "", false
+}
+
+func (s *Server) HandleLOGIN(client *Client, pkg *packet.Packet) (string, bool) {
 	protocolVersion, err := pkg.ReadInt()
 	if err != nil {
 		return err.Error(), true
@@ -280,7 +273,7 @@ func (s *Server) broadcastToConnectedClients(data ...interface{}) {
 	}
 }
 
-func listeningLoop(C chan net.Conn) {
+func listeningLoop(C chan io.ReadWriteCloser) {
 	ln, err := net.Listen("tcp", ":7395") // TODO(sirver): softcode this
 	if err != nil {
 		log.Fatal(err)
@@ -296,13 +289,13 @@ func listeningLoop(C chan net.Conn) {
 }
 func CreateServer() *Server {
 	// NOCOM(sirver): should use a proper database connection or flat file
-	C := make(chan net.Conn)
+	C := make(chan io.ReadWriteCloser)
 	// NOCOM(sirver): no way to stop the listening loop right now
 	go listeningLoop(C)
 	return CreateServerUsing(C, NewInMemoryDb())
 }
 
-func CreateServerUsing(acceptedConnections chan net.Conn, db UserDb) *Server {
+func CreateServerUsing(acceptedConnections chan io.ReadWriteCloser, db UserDb) *Server {
 	server := &Server{
 		acceptedConnections:  acceptedConnections,
 		shutdownServer:       make(chan bool),
@@ -312,7 +305,7 @@ func CreateServerUsing(acceptedConnections chan net.Conn, db UserDb) *Server {
 		clientSendingTimeout: time.Second * 30,
 		pingCycleTime:        time.Second * 15,
 	}
-	go server.acceptLoop()
+
 	go server.mainLoop()
 	return server
 }

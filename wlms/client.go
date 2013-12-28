@@ -1,13 +1,12 @@
 package main
 
 import (
+	"io"
 	"launchpad.net/wlmetaserver/wlms/packet"
 	"log"
-	"net"
 	"time"
 )
 
-// NOCOM(sirver): think about these again
 type Permissions int
 
 const (
@@ -40,7 +39,7 @@ const (
 )
 
 type Client struct {
-	conn       net.Conn
+	conn       io.ReadWriteCloser
 	DataStream chan *packet.Packet
 
 	state       State
@@ -50,7 +49,7 @@ type Client struct {
 	buildId     string
 }
 
-func NewClient(r net.Conn) *Client {
+func NewClient(r io.ReadWriteCloser) *Client {
 	client := &Client{conn: r, DataStream: make(chan *packet.Packet, 10), state: HANDSHAKE, permissions: UNREGISTERED}
 	go client.readingLoop()
 	return client
@@ -97,8 +96,7 @@ func (client *Client) readingLoop() {
 	for {
 		pkg, err := packet.Read(client.conn)
 		if err != nil {
-			// TODO(sirver): do something
-			log.Printf("err: %v\n", err)
+			log.Printf("Error reading packet: %v\n", err)
 			break
 		}
 		client.DataStream <- pkg
