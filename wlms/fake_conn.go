@@ -1,4 +1,4 @@
-package test_utils
+package main
 
 import (
 	"io"
@@ -8,6 +8,15 @@ import (
 	"net"
 	"time"
 )
+
+type FakeAddr struct{}
+
+func (a FakeAddr) Network() string {
+	return "TestingNetwork"
+}
+func (a FakeAddr) String() string {
+	return "TestingString"
+}
 
 type FakeConn struct {
 	Packets         chan *packet.Packet

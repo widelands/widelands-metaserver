@@ -11,12 +11,12 @@ import (
 )
 
 type Server struct {
-	shutdownServer    chan bool
-	serverHasShutdown chan bool
-	clients           *list.List
-	listener          net.Listener
-	user_db           UserDb
-	motd              string
+	acceptedConnections chan net.Conn
+	shutdownServer      chan bool
+	serverHasShutdown   chan bool
+	clients             *list.List
+	user_db             UserDb
+	motd                string
 
 	clientSendingTimeout time.Duration
 	pingCycleTime        time.Duration
@@ -55,18 +55,17 @@ func (s *Server) shutdown() error {
 		e.Value.(*Client).Disconnect()
 		s.clients.Remove(e)
 	}
-	s.listener.Close()
+	close(s.acceptedConnections)
 	s.serverHasShutdown <- true
 	return nil
 }
 
+// NOCOM(sirver): I think accept loop is no longer needed. Use main loop?
 func (s *Server) acceptLoop() {
 	log.Print("Starting Goroutine: acceptLoop")
 	for {
-		conn, err := s.listener.Accept()
-		log.Printf("conn: %v, err: %v\n", conn, err)
-		if err != nil {
-			log.Printf("Error accepting a connection: %v", err)
+		conn, ok := <-s.acceptedConnections
+		if !ok {
 			break
 		}
 		go s.dealWithClient(NewClient(conn))
@@ -123,9 +122,10 @@ func (s *Server) dealWithClient(client *Client) {
 					log.Printf("%s has disconnected with reason %s.", client.Name(), reason)
 					client.Disconnect()
 					done = true
-				case "PONG":
+				case "PONG", "CLIENTS", "GAMES":
 					// do nothing
 				default:
+					log.Printf("%s: Garbage packet %s", client.Name(), cmdName)
 					client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 					client.Disconnect()
 					done = true
@@ -280,21 +280,34 @@ func (s *Server) broadcastToConnectedClients(data ...interface{}) {
 	}
 }
 
-func CreateServer() *Server {
+func listeningLoop(C chan net.Conn) {
 	ln, err := net.Listen("tcp", ":7395") // TODO(sirver): softcode this
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			break
+		}
+		C <- conn
+	}
+}
+func CreateServer() *Server {
 	// NOCOM(sirver): should use a proper database connection or flat file
-	return CreateServerUsing(ln, NewInMemoryDb())
+	C := make(chan net.Conn)
+	// NOCOM(sirver): no way to stop the listening loop right now
+	go listeningLoop(C)
+	return CreateServerUsing(C, NewInMemoryDb())
 }
 
-func CreateServerUsing(l net.Listener, db UserDb) *Server {
+func CreateServerUsing(acceptedConnections chan net.Conn, db UserDb) *Server {
 	server := &Server{
+		acceptedConnections:  acceptedConnections,
 		shutdownServer:       make(chan bool),
 		serverHasShutdown:    make(chan bool),
 		clients:              list.New(),
-		listener:             l,
 		user_db:              db,
 		clientSendingTimeout: time.Second * 30,
 		pingCycleTime:        time.Second * 15,

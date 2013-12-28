@@ -3,8 +3,8 @@ package main
 import (
 	. "launchpad.net/gocheck"
 	"launchpad.net/wlmetaserver/wlms/packet"
-	"launchpad.net/wlmetaserver/wlms/test_utils"
 	"log"
+	"net"
 	"testing"
 	"time"
 )
@@ -18,7 +18,7 @@ var _ = Suite(&EndToEndSuite{})
 
 type Matching string
 
-func writeDataToConnection(conn test_utils.FakeConn, data ...string) {
+func writeDataToConnection(conn FakeConn, data ...string) {
 	go func() {
 		for _, d := range data {
 			conn.Write([]byte(d))
@@ -27,27 +27,30 @@ func writeDataToConnection(conn test_utils.FakeConn, data ...string) {
 	}()
 }
 
-func SendPacket(f test_utils.FakeConn, data ...interface{}) {
+func SendPacket(f FakeConn, data ...interface{}) {
 	f.ServerWriter().Write(packet.New(data...))
 }
 
-func ExpectClosed(c *C, f test_utils.FakeConn) {
+func ExpectClosed(c *C, f FakeConn) {
 	c.Assert(f.GotClosed(), Equals, true)
 }
 
-func SetupServer(c *C, nClients int) (*Server, []test_utils.FakeConn) {
+func SetupServer(c *C, nClients int) (*Server, []FakeConn) {
 	log.SetFlags(log.Lshortfile)
-	cons := make([]test_utils.FakeConn, nClients)
-	for i := range cons {
-		cons[i] = test_utils.NewFakeConn(c)
-	}
 	db := NewInMemoryDb()
 	db.AddUser("SirVer", "123456", SUPERUSER)
 	db.AddUser("otto", "ottoiscool", REGISTERED)
-	return CreateServerUsing(test_utils.NewFakeListener(cons), db), cons
+
+	acceptingConnections := make(chan net.Conn, 20)
+	cons := make([]FakeConn, nClients)
+	for i := range cons {
+		cons[i] = NewFakeConn(c)
+		acceptingConnections <- cons[i]
+	}
+	return CreateServerUsing(acceptingConnections, db), cons
 }
 
-func ExpectPacket(c *C, f test_utils.FakeConn, expected ...interface{}) {
+func ExpectPacket(c *C, f FakeConn, expected ...interface{}) {
 	timer := time.NewTimer(20 * time.Millisecond)
 	select {
 	case packet := <-f.Packets:
@@ -66,14 +69,14 @@ func ExpectPacket(c *C, f test_utils.FakeConn, expected ...interface{}) {
 	}
 }
 
-func ExpectLoginAsUnregisteredWorks(c *C, f test_utils.FakeConn, name string) {
+func ExpectLoginAsUnregisteredWorks(c *C, f FakeConn, name string) {
 	SendPacket(f, "LOGIN", 0, name, "bzr1234[trunk]", false)
 	ExpectPacket(c, f, "LOGIN", name, "UNREGISTERED")
 	ExpectPacket(c, f, "TIME", Matching("\\d+"))
 	ExpectPacket(c, f, "CLIENTS_UPDATE")
 }
 
-func ExpectLoginAsRegisteredWorks(c *C, f test_utils.FakeConn, name, password string) {
+func ExpectLoginAsRegisteredWorks(c *C, f FakeConn, name, password string) {
 	SendPacket(f, "LOGIN", 0, name, "bzr1234[trunk]", true, password)
 	ExpectPacket(c, f, "LOGIN", name, Matching("(REGISTERED|SUPERUSER)"))
 	ExpectPacket(c, f, "TIME", Matching("\\d+"))
@@ -88,26 +91,26 @@ func ExpectServerToShutdownCleanly(c *C, server *Server) {
 
 // Test Packet decoding {{{
 func (s *EndToEndSuite) TestSimplePacket(c *C) {
-	conn := test_utils.NewFakeConn(c)
+	conn := NewFakeConn(c)
 	writeDataToConnection(conn, "\x00\x07aaaa\x00")
 	ExpectPacket(c, conn, "aaaa")
 }
 
 func (s *EndToEndSuite) TestSimplePacket1(c *C) {
-	conn := test_utils.NewFakeConn(c)
+	conn := NewFakeConn(c)
 	writeDataToConnection(conn, "\x00\x10aaaa\x00bbb\x00cc\x00d\x00")
 	ExpectPacket(c, conn, "aaaa", "bbb", "cc", "d")
 }
 
 func (s *EndToEndSuite) TestTwoPacketsInOneRead(c *C) {
-	conn := test_utils.NewFakeConn(c)
+	conn := NewFakeConn(c)
 	writeDataToConnection(conn, "\x00\x07aaaa\x00\x00\x07aaaa\x00")
 	ExpectPacket(c, conn, "aaaa")
 	ExpectPacket(c, conn, "aaaa")
 }
 
 func (p *EndToEndSuite) TestFragmentedPackets(c *C) {
-	conn := test_utils.NewFakeConn(c)
+	conn := NewFakeConn(c)
 	writeDataToConnection(conn, "\x00\x0aCLI", "ENTS\x00\x00\x0a", "CLIENTS\x00\x00\x08")
 	ExpectPacket(c, conn, "CLIENTS")
 	ExpectPacket(c, conn, "CLIENTS")
