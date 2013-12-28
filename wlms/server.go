@@ -85,24 +85,28 @@ func (s *Server) shutdown() error {
 	return nil
 }
 
+// NOCOM(sirver): feels like this should actually be in Client
 func (s *Server) dealWithClient(client *Client) {
 	log.Print("Starting Goroutine: dealWithClient")
-	timeout_channel := make(chan bool)
-	startToPingTimer := time.NewTimer(s.pingCycleTime)
-	waitingForPong := false
+	client.startToPingTimer = time.NewTimer(s.pingCycleTime)
+	client.timeoutTimer = time.NewTimer(s.clientSendingTimeout)
+	client.waitingForPong = false
 
 	for done := false; !done; {
-		time.AfterFunc(s.clientSendingTimeout, func() {
-			timeout_channel <- true
-		})
 		select {
 		case pkg, ok := <-client.DataStream:
 			if !ok {
 				done = true
 				break
 			}
-			waitingForPong = false
-			startToPingTimer.Reset(s.pingCycleTime)
+			client.waitingForPong = false
+			if client.pendingRelogin != nil {
+				client.pendingRelogin.SendPacket("ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
+				client.pendingRelogin.Disconnect()
+				client.pendingRelogin = nil
+			}
+			client.startToPingTimer.Reset(s.pingCycleTime)
+			client.timeoutTimer.Reset(s.clientSendingTimeout)
 
 			cmdName, err := pkg.ReadString()
 			if err != nil {
@@ -124,18 +128,25 @@ func (s *Server) dealWithClient(client *Client) {
 				client.Disconnect()
 				done = true
 			}
-		case <-timeout_channel:
+		case <-client.timeoutTimer.C:
 			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 			done = true
-		case <-startToPingTimer.C:
-			if waitingForPong {
+		case <-client.startToPingTimer.C:
+			if client.waitingForPong {
+				if client.pendingRelogin != nil {
+					client.pendingRelogin.SendPacket("RELOGIN")
+					client.pendingRelogin.SetState(CONNECTED)
+					s.clients.PushBack(client.pendingRelogin)
+				}
 				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 				done = true
 				break
 			}
-			client.SendPacket("PING")
-			waitingForPong = true
-			startToPingTimer.Reset(s.pingCycleTime)
+			if client.State() != HANDSHAKE {
+				client.SendPacket("PING")
+				client.waitingForPong = true
+			}
+			client.startToPingTimer.Reset(s.pingCycleTime)
 		}
 	}
 	client.Disconnect()
@@ -144,9 +155,9 @@ func (s *Server) dealWithClient(client *Client) {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client) == client {
 			s.clients.Remove(e)
+			s.broadcastToConnectedClients("CLIENTS_UPDATE")
 		}
 	}
-	s.broadcastToConnectedClients("CLIENTS_UPDATE")
 }
 
 func (s *Server) HandleCHAT(client *Client, pkg *packet.Packet) (string, bool) {
@@ -261,6 +272,7 @@ func (s *Server) HandleLOGIN(client *Client, pkg *packet.Packet) (string, bool) 
 		}
 	}
 
+	client.SetProtocolVersion(protocolVersion)
 	client.SetBuildId(buildId)
 	client.SetName(userName)
 	client.SetLoginTime(time.Now())
@@ -274,6 +286,67 @@ func (s *Server) HandleLOGIN(client *Client, pkg *packet.Packet) (string, bool) 
 	if len(s.motd) != 0 {
 		client.SendPacket("CHAT", "", s.motd, "system")
 	}
+
+	return "", false
+}
+
+func (s *Server) HandleRELOGIN(client *Client, pkg *packet.Packet) (string, bool) {
+	// NOCOM(sirver): code duplication
+	protocolVersion, err := pkg.ReadInt()
+	if err != nil {
+		return err.Error(), true
+	}
+
+	userName, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), true
+	}
+
+	oldClient := s.isLoggedIn(userName)
+	if oldClient == nil {
+		return "NOT_LOGGED_IN", true
+	}
+
+	informationMatches := true
+	if protocolVersion != client.ProtocolVersion() {
+		informationMatches = false
+	}
+
+	buildId, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), true
+	}
+	log.Printf("buildId: %v, oldClient.BuildId(): %v\n", buildId, oldClient.BuildId())
+	if buildId != oldClient.BuildId() {
+		informationMatches = false
+	}
+
+	isRegisteredOnServer, err := pkg.ReadBool()
+	if err != nil {
+		return err.Error(), true
+	}
+
+	if isRegisteredOnServer {
+		password, err := pkg.ReadString()
+		if err != nil {
+			return err.Error(), true
+		}
+		if oldClient.Permissions() == UNREGISTERED || !s.user_db.PasswordCorrect(userName, password) {
+			informationMatches = false
+		}
+	} else if oldClient.Permissions() != UNREGISTERED {
+		informationMatches = false
+	}
+
+	if !informationMatches {
+		return "WRONG_INFORMATION", true
+	}
+
+	// NOCOM(sirver): refactor into method and move into client
+	oldClient.SendPacket("PING")
+	oldClient.waitingForPong = true
+	oldClient.startToPingTimer.Reset(s.pingCycleTime)
+	oldClient.pendingRelogin = client
 
 	return "", false
 }

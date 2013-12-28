@@ -42,17 +42,34 @@ type Client struct {
 	conn       io.ReadWriteCloser
 	DataStream chan *packet.Packet
 
-	state       State
-	permissions Permissions
-	name        string
-	loginTime   time.Time
-	buildId     string
+	protocolVersion  int
+	startToPingTimer *time.Timer
+	timeoutTimer     *time.Timer
+	waitingForPong   bool
+	pendingRelogin   *Client
+	state            State
+	permissions      Permissions
+	name             string
+	loginTime        time.Time
+	buildId          string
 }
 
 func NewClient(r io.ReadWriteCloser) *Client {
-	client := &Client{conn: r, DataStream: make(chan *packet.Packet, 10), state: HANDSHAKE, permissions: UNREGISTERED}
+	client := &Client{
+		conn:        r,
+		DataStream:  make(chan *packet.Packet, 10),
+		state:       HANDSHAKE,
+		permissions: UNREGISTERED,
+	}
 	go client.readingLoop()
 	return client
+}
+
+func (c Client) ProtocolVersion() int {
+	return c.protocolVersion
+}
+func (c *Client) SetProtocolVersion(v int) {
+	c.protocolVersion = v
 }
 
 func (c Client) Permissions() Permissions {
@@ -72,7 +89,7 @@ func (c *Client) SetState(s State) {
 func (c Client) BuildId() string {
 	return c.buildId
 }
-func (c Client) SetBuildId(v string) {
+func (c *Client) SetBuildId(v string) {
 	c.buildId = v
 }
 
@@ -105,7 +122,7 @@ func (client *Client) readingLoop() {
 	log.Print("Ending Goroutine: readingLoop")
 }
 
-func (client *Client) Name() string {
+func (client Client) Name() string {
 	return client.name
 }
 func (client *Client) SetName(name string) {

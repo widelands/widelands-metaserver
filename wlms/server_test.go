@@ -222,6 +222,121 @@ func (s *EndToEndSuite) TestRegisteredUserAlreadyLoggedIn(c *C) {
 }
 
 /// }}}
+// Test Relogin {{{
+func (e *EndToEndSuite) TestReloginPingAndReply(c *C) {
+	server, clients := SetupServer(c, 2)
+	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
+
+	SendPacket(clients[1], "RELOGIN", 0, "bert", "bzr1234[trunk]", false)
+
+	ExpectPacket(c, clients[0], "PING")
+	SendPacket(clients[0], "PONG")
+
+	ExpectPacket(c, clients[1], "ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
+	ExpectClosed(c, clients[1])
+
+	c.Assert(server.NrClients(), Equals, 1)
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (e *EndToEndSuite) TestReloginForNonAnonymous(c *C) {
+	server, clients := SetupServer(c, 2)
+	ExpectLoginAsRegisteredWorks(c, clients[0], "otto", "ottoiscool")
+
+	server.SetPingCycleTime(5 * time.Millisecond)
+
+	SendPacket(clients[1], "RELOGIN", 0, "otto", "bzr1234[trunk]", true, "ottoiscool")
+	ExpectPacket(c, clients[0], "PING")
+
+	time.Sleep(6 * time.Millisecond)
+
+	ExpectPacket(c, clients[0], "DISCONNECT", "CLIENT_TIMEOUT")
+	ExpectClosed(c, clients[0])
+
+	ExpectPacket(c, clients[1], "RELOGIN")
+	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+
+	c.Assert(server.NrClients(), Equals, 1)
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (e *EndToEndSuite) TestReloginPingAndNoReply(c *C) {
+	server, clients := SetupServer(c, 3)
+	server.SetPingCycleTime(5 * time.Millisecond)
+
+	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
+	ExpectLoginAsUnregisteredWorks(c, clients[2], "ernie")
+	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
+
+	SendPacket(clients[1], "RELOGIN", 0, "bert", "bzr1234[trunk]", false)
+
+	time.Sleep(6 * time.Millisecond)
+	ExpectPacket(c, clients[0], "PING")
+	ExpectPacket(c, clients[2], "PING")
+
+	SendPacket(clients[2], "PONG")
+	time.Sleep(6 * time.Millisecond) // No reply for client 0
+
+	// Connection terminated for old user.
+	ExpectPacket(c, clients[0], "DISCONNECT", "CLIENT_TIMEOUT")
+	ExpectClosed(c, clients[0])
+
+	ExpectPacket(c, clients[1], "RELOGIN")
+	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+
+	ExpectPacket(c, clients[2], "CLIENTS_UPDATE")
+
+	c.Assert(server.NrClients(), Equals, 2)
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (e *EndToEndSuite) TestReloginNotLoggedIn(c *C) {
+	server, clients := SetupServer(c, 1)
+
+	SendPacket(clients[0], "RELOGIN", 0, "bert", "bzr1234[trunk]", false)
+	ExpectPacket(c, clients[0], "ERROR", "RELOGIN", "NOT_LOGGED_IN")
+	ExpectClosed(c, clients[0])
+
+	c.Assert(server.NrClients(), Equals, 0)
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (e *EndToEndSuite) TestReloginWrongInformations(c *C) {
+	server, clients := SetupServer(c, 10)
+
+	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
+	ExpectLoginAsRegisteredWorks(c, clients[1], "SirVer", "123456")
+
+	// Wrong Proto
+	SendPacket(clients[2], "RELOGIN", 1, "bert", "bzr1234[trunk]", false)
+	ExpectPacket(c, clients[2], "ERROR", "RELOGIN", "WRONG_INFORMATION")
+	ExpectClosed(c, clients[2])
+
+	// Wrong buildid.
+	SendPacket(clients[3], "RELOGIN", 0, "bert", "bzr234[trunk]", false)
+	ExpectPacket(c, clients[3], "ERROR", "RELOGIN", "WRONG_INFORMATION")
+	ExpectClosed(c, clients[3])
+
+	// Claim we are registered
+	SendPacket(clients[4], "RELOGIN", 0, "bert", "bzr1234[trunk]", true, "123123")
+	ExpectPacket(c, clients[4], "ERROR", "RELOGIN", "WRONG_INFORMATION")
+	ExpectClosed(c, clients[4])
+
+	// Claim we are unregistered.
+	SendPacket(clients[5], "RELOGIN", 0, "SirVer", "bzr1234[trunk]", false)
+	ExpectPacket(c, clients[5], "ERROR", "RELOGIN", "WRONG_INFORMATION")
+	ExpectClosed(c, clients[5])
+
+	// Wrong password.
+	SendPacket(clients[6], "RELOGIN", 0, "SirVer", "bzr1234[trunk]", true, "13245")
+	ExpectPacket(c, clients[6], "ERROR", "RELOGIN", "WRONG_INFORMATION")
+	ExpectClosed(c, clients[6])
+
+	c.Assert(server.NrClients(), Equals, 2)
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+// }}}
 // Test Disconnect {{{
 func (e *EndToEndSuite) TestDisconnect(c *C) {
 	server, clients := SetupServer(c, 2)
