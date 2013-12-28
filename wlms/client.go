@@ -39,19 +39,36 @@ const (
 )
 
 type Client struct {
-	conn       io.ReadWriteCloser
+	// The connection (net.Conn most likely) that let us talk to the other site.
+	conn io.ReadWriteCloser
+
+	// We always read one whole packet and send it over this to the consumer.
 	DataStream chan *packet.Packet
 
-	protocolVersion  int
+	// the time when the user logged in for the first time. Relogins do not
+	// update this time.
+	loginTime time.Time
+
+	// the protocol version used for communication
+	protocolVersion int
+
+	// the current connection state
+	state State
+
+	// is this a registered user/super user?
+	permissions Permissions
+
+	// name displayed in the GUI. This is guaranteed to be unique on the Server.
+	userName string
+
+	// the buildId of Widelands executable that this client is using.
+	buildId string
+
+	// Various state variables needed for fulfilling the protocol.
 	startToPingTimer *time.Timer
 	timeoutTimer     *time.Timer
 	waitingForPong   bool
 	pendingRelogin   *Client
-	state            State
-	permissions      Permissions
-	name             string
-	loginTime        time.Time
-	buildId          string
 }
 
 func NewClient(r io.ReadWriteCloser) *Client {
@@ -104,7 +121,7 @@ func (client *Client) Disconnect() error {
 }
 
 func (client *Client) SendPacket(data ...interface{}) {
-	log.Printf("Sending to %s: %v\n", client.name, data)
+	log.Printf("Sending to %s: %v\n", client.userName, data)
 	client.conn.Write(packet.New(data...))
 }
 
@@ -123,10 +140,10 @@ func (client *Client) readingLoop() {
 }
 
 func (client Client) Name() string {
-	return client.name
+	return client.userName
 }
-func (client *Client) SetName(name string) {
-	client.name = name
+func (client *Client) SetName(userName string) {
+	client.userName = userName
 }
 
 func (client *Client) LoginTime() time.Time {
