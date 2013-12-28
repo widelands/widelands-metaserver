@@ -345,7 +345,7 @@ func (s *EndToEndSuite) TestRegularPingCycle(c *C) {
 }
 
 // }}}
-
+// Test Motd {{{
 func (s *EndToEndSuite) TestMotd(c *C) {
 	server, clients := SetupServer(c, 3)
 
@@ -372,3 +372,31 @@ func (s *EndToEndSuite) TestMotd(c *C) {
 
 	ExpectServerToShutdownCleanly(c, server)
 }
+
+// }}}
+// Test Announcement  {{{
+func (s *EndToEndSuite) TestAnnouncement(c *C) {
+	server, clients := SetupServer(c, 3)
+
+	ExpectLoginAsRegisteredWorks(c, clients[0], "SirVer", "123456")
+	ExpectLoginAsRegisteredWorks(c, clients[1], "otto", "ottoiscool")
+	ExpectLoginAsUnregisteredWorks(c, clients[2], "bert")
+	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
+	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
+	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+
+	// Check Superuser announcing.
+	SendPacket(clients[0], "ANNOUNCEMENT", "Schnulz is cool!")
+	ExpectPacket(c, clients[1], "CHAT", "", "Schnulz is cool!", "system")
+	ExpectPacket(c, clients[2], "CHAT", "", "Schnulz is cool!", "system")
+
+	// Check other users can not announce.
+	SendPacket(clients[1], "ANNOUNCEMENT", "Schnulz is cool!")
+	SendPacket(clients[2], "ANNOUNCEMENT", "Schnulz is cool!")
+	ExpectPacket(c, clients[1], "ERROR", "ANNOUNCEMENT", "DEFICIENT_PERMISSION")
+	ExpectPacket(c, clients[2], "ERROR", "ANNOUNCEMENT", "DEFICIENT_PERMISSION")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+// }}}

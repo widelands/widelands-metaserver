@@ -188,6 +188,20 @@ func (s *Server) HandleMOTD(client *Client, pkg *packet.Packet) (string, bool) {
 	return "", false
 }
 
+func (s *Server) HandleANNOUNCEMENT(client *Client, pkg *packet.Packet) (string, bool) {
+	message, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), false
+	}
+
+	if client.Permissions() != SUPERUSER {
+		return "DEFICIENT_PERMISSION", false
+	}
+	s.broadcastToConnectedClients("CHAT", "", message, "system")
+
+	return "", false
+}
+
 func (s *Server) HandleDISCONNECT(client *Client, pkg *packet.Packet) (string, bool) {
 	reason, err := pkg.ReadString()
 	if err != nil {
