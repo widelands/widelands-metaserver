@@ -1,9 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"launchpad.net/wlmetaserver/wlms/packet"
 	"log"
+	"reflect"
+	"strings"
 	"time"
 )
 
@@ -43,7 +46,7 @@ type Client struct {
 	conn io.ReadWriteCloser
 
 	// We always read one whole packet and send it over this to the consumer.
-	DataStream chan *packet.Packet
+	dataStream chan *packet.Packet
 
 	// the time when the user logged in for the first time. Relogins do not
 	// update this time.
@@ -71,10 +74,10 @@ type Client struct {
 	pendingRelogin   *Client
 }
 
-func NewClient(r io.ReadWriteCloser) *Client {
+func newClient(r io.ReadWriteCloser) *Client {
 	client := &Client{
 		conn:        r,
-		DataStream:  make(chan *packet.Packet, 10),
+		dataStream:  make(chan *packet.Packet, 10),
 		state:       HANDSHAKE,
 		permissions: UNREGISTERED,
 	}
@@ -82,40 +85,16 @@ func NewClient(r io.ReadWriteCloser) *Client {
 	return client
 }
 
-func (c Client) ProtocolVersion() int {
-	return c.protocolVersion
-}
-func (c *Client) SetProtocolVersion(v int) {
-	c.protocolVersion = v
-}
-
-func (c Client) Permissions() Permissions {
-	return c.permissions
-}
-func (c *Client) SetPermissions(v Permissions) {
-	c.permissions = v
-}
-
 func (c Client) State() State {
 	return c.state
-}
-func (c *Client) SetState(s State) {
-	c.state = s
-}
-
-func (c Client) BuildId() string {
-	return c.buildId
-}
-func (c *Client) SetBuildId(v string) {
-	c.buildId = v
 }
 
 func (client *Client) Disconnect() error {
 	log.Printf("In Disconnect\n")
 	client.conn.Close()
-	if client.DataStream != nil {
-		close(client.DataStream)
-		client.DataStream = nil
+	if client.dataStream != nil {
+		close(client.dataStream)
+		client.dataStream = nil
 	}
 	return nil
 }
@@ -123,6 +102,76 @@ func (client *Client) Disconnect() error {
 func (client *Client) SendPacket(data ...interface{}) {
 	log.Printf("Sending to %s: %v\n", client.userName, data)
 	client.conn.Write(packet.New(data...))
+}
+
+func (client Client) Name() string {
+	return client.userName
+}
+
+func DealWithNewConnection(conn io.ReadWriteCloser, server *Server) {
+	client := newClient(conn)
+	log.Print("Starting Goroutine: DealWithNewConnection")
+	client.startToPingTimer = time.NewTimer(server.PingCycleTime())
+	client.timeoutTimer = time.NewTimer(server.ClientSendingTimeout())
+	client.waitingForPong = false
+
+	for done := false; !done; {
+		select {
+		case pkg, ok := <-client.dataStream:
+			if !ok {
+				done = true
+				break
+			}
+			client.waitingForPong = false
+			if client.pendingRelogin != nil {
+				client.pendingRelogin.SendPacket("ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
+				client.pendingRelogin.Disconnect()
+				client.pendingRelogin = nil
+			}
+			client.startToPingTimer.Reset(server.PingCycleTime())
+			client.timeoutTimer.Reset(server.ClientSendingTimeout())
+
+			cmdName, err := pkg.ReadString()
+			if err != nil {
+				done = true
+				break
+			}
+
+			handlerFunc := reflect.ValueOf(client).MethodByName(strings.Join([]string{"Handle", cmdName}, ""))
+			if handlerFunc.IsValid() {
+				handlerFunc := handlerFunc.Interface().(func(*Server, *packet.Packet) (string, bool))
+				errString := ""
+				errString, done = handlerFunc(server, pkg)
+				if errString != "" {
+					client.SendPacket("ERROR", cmdName, errString)
+				}
+			} else {
+				log.Printf("%s: Garbage packet %s", client.Name(), cmdName)
+				client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
+				client.Disconnect()
+				done = true
+			}
+		case <-client.timeoutTimer.C:
+			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
+			done = true
+		case <-client.startToPingTimer.C:
+			if client.waitingForPong {
+				if client.pendingRelogin != nil {
+					client.pendingRelogin.SendPacket("RELOGIN")
+					client.pendingRelogin.state = CONNECTED
+					server.AddClient(client.pendingRelogin)
+				}
+				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
+				done = true
+				break
+			}
+			client.restartPingLoop(server.PingCycleTime())
+		}
+	}
+	client.Disconnect()
+
+	server.RemoveClient(client)
+	log.Print("Ending Goroutine: DealWithNewConnection")
 }
 
 func (client *Client) readingLoop() {
@@ -133,22 +182,202 @@ func (client *Client) readingLoop() {
 			log.Printf("Error reading packet: %v\n", err)
 			break
 		}
-		client.DataStream <- pkg
+		client.dataStream <- pkg
 	}
 	client.Disconnect()
 	log.Print("Ending Goroutine: readingLoop")
 }
 
-func (client Client) Name() string {
-	return client.userName
-}
-func (client *Client) SetName(userName string) {
-	client.userName = userName
+func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
+	if client.State() != HANDSHAKE {
+		client.SendPacket("PING")
+		client.waitingForPong = true
+	}
+	client.startToPingTimer.Reset(pingCycleTime)
 }
 
-func (client *Client) LoginTime() time.Time {
-	return client.loginTime
+func (client *Client) HandleCHAT(server *Server, pkg *packet.Packet) (string, bool) {
+	message, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), false
+	}
+
+	// Sanitize message.
+	message = strings.Replace(message, "<", "&lt;", -1)
+	receiver, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), false
+	}
+
+	if len(receiver) == 0 {
+		server.broadcastToConnectedClients("CHAT", client.Name(), message, "public")
+	} else {
+		recv_client := server.isLoggedIn(receiver)
+		if recv_client != nil {
+			recv_client.SendPacket("CHAT", client.Name(), message, "private")
+		}
+	}
+	return "", false
 }
-func (client *Client) SetLoginTime(loginTime time.Time) {
-	client.loginTime = loginTime
+
+func (client *Client) HandleMOTD(server *Server, pkg *packet.Packet) (string, bool) {
+	message, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), false
+	}
+
+	if client.permissions != SUPERUSER {
+		return "DEFICIENT_PERMISSION", false
+	}
+	server.SetMotd(message)
+	server.broadcastToConnectedClients("CHAT", "", server.Motd(), "system")
+
+	return "", false
+}
+
+func (client *Client) HandleANNOUNCEMENT(server *Server, pkg *packet.Packet) (string, bool) {
+	message, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), false
+	}
+
+	if client.permissions != SUPERUSER {
+		return "DEFICIENT_PERMISSION", false
+	}
+	server.broadcastToConnectedClients("CHAT", "", message, "system")
+
+	return "", false
+}
+
+func (client *Client) HandleDISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
+	reason, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), true
+	}
+	log.Printf("%s: leaving. Reason: '%s'", client.Name(), reason)
+	return "", true
+}
+
+func (client *Client) HandlePONG(server *Server, pkg *packet.Packet) (string, bool) {
+	return "", false
+}
+
+func (client *Client) HandleLOGIN(server *Server, pkg *packet.Packet) (string, bool) {
+	protocolVersion, err := pkg.ReadInt()
+	if err != nil {
+		return err.Error(), true
+	}
+	if protocolVersion != 0 {
+		return "UNSUPPORTED_PROTOCOL", true
+	}
+
+	userName, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), true
+	}
+
+	buildId, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), true
+	}
+
+	isRegisteredOnServer, err := pkg.ReadBool()
+	if err != nil {
+		return err.Error(), true
+	}
+
+	if isRegisteredOnServer {
+		if server.isLoggedIn(userName) != nil {
+			return "ALREADY_LOGGED_IN", true
+		}
+		if !server.UserDb().ContainsName(userName) {
+			return "WRONG_PASSWORD", true
+		}
+		password, err := pkg.ReadString()
+		if err != nil {
+			return err.Error(), true
+		}
+		if !server.UserDb().PasswordCorrect(userName, password) {
+			return "WRONG_PASSWORD", true
+		}
+		client.permissions = server.UserDb().Permissions(userName)
+	} else {
+		baseName := userName
+		for i := 1; server.UserDb().ContainsName(userName) || server.isLoggedIn(userName) != nil; i++ {
+			userName = fmt.Sprintf("%s%d", baseName, i)
+		}
+	}
+
+	client.protocolVersion = protocolVersion
+	client.buildId = buildId
+	client.userName = userName
+	client.loginTime = time.Now()
+	client.state = CONNECTED
+
+	client.SendPacket("LOGIN", userName, client.permissions.String())
+	client.SendPacket("TIME", int(time.Now().Unix()))
+	server.AddClient(client)
+	server.broadcastToConnectedClients("CLIENTS_UPDATE")
+
+	if len(server.Motd()) != 0 {
+		client.SendPacket("CHAT", "", server.Motd(), "system")
+	}
+
+	return "", false
+}
+
+func (client *Client) HandleRELOGIN(server *Server, pkg *packet.Packet) (string, bool) {
+	protocolVersion, err := pkg.ReadInt()
+	if err != nil {
+		return err.Error(), true
+	}
+
+	userName, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), true
+	}
+
+	oldClient := server.isLoggedIn(userName)
+	if oldClient == nil {
+		return "NOT_LOGGED_IN", true
+	}
+	informationMatches := true
+
+	if protocolVersion != client.protocolVersion {
+		informationMatches = false
+	}
+
+	buildId, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), true
+	}
+	if buildId != oldClient.buildId {
+		informationMatches = false
+	}
+
+	isRegisteredOnServer, err := pkg.ReadBool()
+	if err != nil {
+		return err.Error(), true
+	}
+
+	if isRegisteredOnServer {
+		password, err := pkg.ReadString()
+		if err != nil {
+			return err.Error(), true
+		}
+		if oldClient.permissions == UNREGISTERED || !server.UserDb().PasswordCorrect(userName, password) {
+			informationMatches = false
+		}
+	} else if oldClient.permissions != UNREGISTERED {
+		informationMatches = false
+	}
+
+	if !informationMatches {
+		return "WRONG_INFORMATION", true
+	}
+
+	oldClient.restartPingLoop(server.PingCycleTime())
+	oldClient.pendingRelogin = client
+
+	return "", false
 }
