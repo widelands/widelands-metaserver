@@ -3,14 +3,12 @@ package main
 import (
 	"container/list"
 	"fmt"
+	"launchpad.net/wlmetaserver/wlms/packet"
 	"log"
 	"net"
 	"strings"
 	"time"
 )
-
-// TODO(sirver): should not be constant
-const MOTD string = "Welcome on the Widelands Server."
 
 type Server struct {
 	shutdownServer    chan bool
@@ -18,6 +16,7 @@ type Server struct {
 	clients           *list.List
 	listener          net.Listener
 	user_db           UserDb
+	motd              string
 
 	clientSendingTimeout time.Duration
 	pingCycleTime        time.Duration
@@ -75,6 +74,20 @@ func (s *Server) acceptLoop() {
 	log.Print("Ending Goroutine: acceptLoop")
 }
 
+type handlerFunction func(client *Client, packet *packet.Packet) (string, bool)
+
+func (s *Server) dealWithPacket(cmdName string, hf handlerFunction, client *Client, packet *packet.Packet) bool {
+	errString, disconnect := hf(client, packet)
+	if errString != "" {
+		client.SendPacket("ERROR", cmdName, errString)
+	}
+	if disconnect {
+		client.Disconnect()
+		return true
+	}
+	return false
+}
+
 func (s *Server) dealWithClient(client *Client) {
 	log.Print("Starting Goroutine: dealWithClient")
 	timeout_channel := make(chan bool)
@@ -100,17 +113,11 @@ func (s *Server) dealWithClient(client *Client) {
 				}
 				switch cmdName {
 				case "CHAT":
-					if errString := s.handleCHAT(client, pkg); errString != "" {
-						client.SendPacket("ERROR", "CHAT", errString)
-						client.Disconnect()
-						done = true
-					}
+					done = s.dealWithPacket(cmdName, s.handleCHAT, client, pkg)
 				case "LOGIN":
-					if errString := s.handleLOGIN(client, pkg); errString != "" {
-						client.SendPacket("ERROR", "LOGIN", errString)
-						client.Disconnect()
-						done = true
-					}
+					done = s.dealWithPacket(cmdName, s.handleLOGIN, client, pkg)
+				case "MOTD":
+					done = s.dealWithPacket(cmdName, s.handleMOTD, client, pkg)
 				case "DISCONNECT":
 					reason, _ := pkg.ReadString()
 					log.Printf("%s has disconnected with reason %s.", client.Name(), reason)
@@ -152,17 +159,17 @@ func (s *Server) dealWithClient(client *Client) {
 	s.broadcastToConnectedClients("CLIENTS_UPDATE")
 }
 
-func (s *Server) handleCHAT(client *Client, pkg *Packet) string {
+func (s *Server) handleCHAT(client *Client, pkg *packet.Packet) (string, bool) {
 	message, err := pkg.ReadString()
 	if err != nil {
-		return err.Error()
+		return err.Error(), false
 	}
 
 	// Sanitize message.
 	message = strings.Replace(message, "<", "&lt;", -1)
 	receiver, err := pkg.ReadString()
 	if err != nil {
-		return err.Error()
+		return err.Error(), false
 	}
 
 	if len(receiver) == 0 {
@@ -173,7 +180,7 @@ func (s *Server) handleCHAT(client *Client, pkg *Packet) string {
 			recv_client.SendPacket("CHAT", client.Name(), message, "private")
 		}
 	}
-	return ""
+	return "", false
 }
 
 func (s *Server) isLoggedIn(name string) *Client {
@@ -186,43 +193,58 @@ func (s *Server) isLoggedIn(name string) *Client {
 	return nil
 }
 
-func (s *Server) handleLOGIN(client *Client, pkg *Packet) string {
+func (s *Server) handleMOTD(client *Client, pkg *packet.Packet) (string, bool) {
+	message, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), false
+	}
+
+	if client.Permissions() != SUPERUSER {
+		return "DEFICIENT_PERMISSION", false
+	}
+	s.motd = message
+	s.broadcastToConnectedClients("CHAT", "", s.motd, "system")
+
+	return "", false
+}
+
+func (s *Server) handleLOGIN(client *Client, pkg *packet.Packet) (string, bool) {
 	protocolVersion, err := pkg.ReadInt()
 	if err != nil {
-		return err.Error()
+		return err.Error(), true
 	}
 	if protocolVersion != 0 {
-		return "UNSUPPORTED_PROTOCOL"
+		return "UNSUPPORTED_PROTOCOL", true
 	}
 
 	userName, err := pkg.ReadString()
 	if err != nil {
-		return err.Error()
+		return err.Error(), true
 	}
 
 	buildId, err := pkg.ReadString()
 	if err != nil {
-		return err.Error()
+		return err.Error(), true
 	}
 
 	isRegisteredOnServer, err := pkg.ReadBool()
 	if err != nil {
-		return err.Error()
+		return err.Error(), true
 	}
 
 	if isRegisteredOnServer {
 		if s.isLoggedIn(userName) != nil {
-			return "ALREADY_LOGGED_IN"
+			return "ALREADY_LOGGED_IN", true
 		}
 		if !s.user_db.ContainsName(userName) {
-			return "WRONG_PASSWORD"
+			return "WRONG_PASSWORD", true
 		}
 		password, err := pkg.ReadString()
 		if err != nil {
-			return err.Error()
+			return err.Error(), true
 		}
 		if !s.user_db.PasswordCorrect(userName, password) {
-			return "WRONG_PASSWORD"
+			return "WRONG_PASSWORD", true
 		}
 		client.SetPermissions(s.user_db.Permissions(userName))
 	} else {
@@ -232,21 +254,21 @@ func (s *Server) handleLOGIN(client *Client, pkg *Packet) string {
 		}
 	}
 
-	// NOCOM(sirver): use buildid
-	log.Printf("buildId: %v\n", buildId)
-
+	client.SetBuildId(buildId)
 	client.SetName(userName)
 	client.SetLoginTime(time.Now())
 	client.SetState(CONNECTED)
 
 	client.SendPacket("LOGIN", userName, client.Permissions().String())
 	client.SendPacket("TIME", int(time.Now().Unix()))
-
-	// NOCOM(sirver): this would actually need a mutex
 	s.clients.PushBack(client)
 	s.broadcastToConnectedClients("CLIENTS_UPDATE")
 
-	return ""
+	if len(s.motd) != 0 {
+		client.SendPacket("CHAT", "", s.motd, "system")
+	}
+
+	return "", false
 }
 
 func (s *Server) broadcastToConnectedClients(data ...interface{}) {

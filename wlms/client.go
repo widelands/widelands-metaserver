@@ -1,6 +1,7 @@
 package main
 
 import (
+	"launchpad.net/wlmetaserver/wlms/packet"
 	"log"
 	"net"
 	"time"
@@ -40,16 +41,17 @@ const (
 
 type Client struct {
 	conn       net.Conn
-	DataStream chan *Packet
+	DataStream chan *packet.Packet
 
 	state       State
 	permissions Permissions
 	name        string
 	loginTime   time.Time
+	buildId     string
 }
 
 func NewClient(r net.Conn) *Client {
-	client := &Client{conn: r, DataStream: make(chan *Packet), state: HANDSHAKE, permissions: UNREGISTERED}
+	client := &Client{conn: r, DataStream: make(chan *packet.Packet, 10), state: HANDSHAKE, permissions: UNREGISTERED}
 	go client.readingLoop()
 	return client
 }
@@ -68,6 +70,13 @@ func (c *Client) SetState(s State) {
 	c.state = s
 }
 
+func (c Client) BuildId() string {
+	return c.buildId
+}
+func (c Client) SetBuildId(v string) {
+	c.buildId = v
+}
+
 func (client *Client) Disconnect() error {
 	log.Printf("In Disconnect\n")
 	client.conn.Close()
@@ -80,13 +89,13 @@ func (client *Client) Disconnect() error {
 
 func (client *Client) SendPacket(data ...interface{}) {
 	log.Printf("Sending to %s: %v\n", client.name, data)
-	client.conn.Write(BuildPacket(data...))
+	client.conn.Write(packet.New(data...))
 }
 
 func (client *Client) readingLoop() {
 	log.Print("Starting Goroutine: readingLoop")
 	for {
-		pkg, err := ReadPacket(client.conn)
+		pkg, err := packet.Read(client.conn)
 		if err != nil {
 			// TODO(sirver): do something
 			log.Printf("err: %v\n", err)

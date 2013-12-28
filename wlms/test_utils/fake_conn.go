@@ -3,12 +3,14 @@ package test_utils
 import (
 	"io"
 	. "launchpad.net/gocheck"
+	"launchpad.net/wlmetaserver/wlms/packet"
 	"log"
 	"net"
 	"time"
 )
 
 type FakeConn struct {
+	Packets         chan *packet.Packet
 	sendData_Reader *io.PipeReader
 	sendData_Writer *io.PipeWriter
 	recvData_Reader *io.PipeReader
@@ -18,10 +20,21 @@ type FakeConn struct {
 }
 
 func NewFakeConn(c *C) FakeConn {
-	f := FakeConn{gotClosed: new(bool)}
+	f := FakeConn{Packets: make(chan *packet.Packet, 20), gotClosed: new(bool)}
 	f.sendData_Reader, f.sendData_Writer = io.Pipe()
 	f.recvData_Reader, f.recvData_Writer = io.Pipe()
+	go f.readPackets()
 	return f
+}
+
+func (f FakeConn) readPackets() {
+	for {
+		pkg, err := packet.Read(f.ServerReader())
+		if err != nil {
+			break
+		}
+		f.Packets <- pkg
+	}
 }
 
 func (f FakeConn) ServerWriter() io.Writer {
