@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"database/sql"
 	"encoding/base64"
+	"fmt"
 	_ "github.com/ziutek/mymysql/godrv"
 	"io"
 	"log"
@@ -59,8 +60,11 @@ type SqlDatabase struct {
 	db *sql.DB
 }
 
-func NewMySqlDatabase(database, user, password string) *SqlDatabase {
-	con, err := sql.Open("mymysql", database+"/"+user+"/"+password)
+func NewMySqlDatabase(database, user, password, table string) *SqlDatabase {
+	s := fmt.Sprintf("%s*%s/%s/%s", database, table, user, password)
+	log.Printf("s: %v\n", s)
+	con, err := sql.Open("mymysql", s)
+
 	if err != nil {
 		log.Fatal("Could not connect to database.")
 	}

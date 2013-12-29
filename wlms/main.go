@@ -1,21 +1,38 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
+	"io/ioutil"
+	"log"
 )
 
+type JsonCfg struct {
+	Database, User, Password, Table string
+}
+
+func (l *JsonCfg) ConfigFrom(path string) error {
+	b, err := ioutil.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, &l)
+}
+
 func main() {
-	var dbuser, dbpasswd, database string
-	flag.StringVar(&database, "database", "inmemory", "Sql Database connection to use.")
-	flag.StringVar(&dbuser, "dbuser", "", "User for mysql database.")
-	flag.StringVar(&dbpasswd, "dbpasswd", "", "Password for user for mysql database.")
+	var config string
+	flag.StringVar(&config, "config", "", "Database configuration file to read.")
 	flag.Parse()
 
 	var db UserDb
-	if database == "inmemory" {
-		db = NewInMemoryDb()
+	if config != "" {
+		var cfg JsonCfg
+		if err := cfg.ConfigFrom(config); err != nil {
+			log.Fatalf("Could not parse config file: %v", err)
+		}
+		db = NewMySqlDatabase(cfg.Database, cfg.User, cfg.Password, cfg.Table)
 	} else {
-		db = NewMySqlDatabase(database, dbuser, dbpasswd)
+		db = NewInMemoryDb()
 	}
 	defer db.Close()
 
