@@ -463,7 +463,8 @@ func (client *Client) HandleGAME_CONNECT(server *Server, pkg *packet.Packet) (st
 	game.AddClient(client)
 	client.game = game
 
-	client.SendPacket("GAME_CONNECT", client.remoteIp())
+	log.Printf("%s joined %s at IP %s.", client.userName, game.name, game.Host().remoteIp())
+	client.SendPacket("GAME_CONNECT", game.Host().remoteIp())
 
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 
