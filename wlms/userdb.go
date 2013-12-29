@@ -62,9 +62,7 @@ type SqlDatabase struct {
 
 func NewMySqlDatabase(database, user, password, table string) *SqlDatabase {
 	s := fmt.Sprintf("%s*%s/%s/%s", database, table, user, password)
-	log.Printf("s: %v\n", s)
 	con, err := sql.Open("mymysql", s)
-
 	if err != nil {
 		log.Fatal("Could not connect to database.")
 	}

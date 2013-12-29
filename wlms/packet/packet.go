@@ -77,7 +77,6 @@ func (p *Packet) ReadInt() (int, error) {
 		return 0, err
 	}
 	i, err := strconv.Atoi(d)
-	log.Printf("d: %v, i: %v\n", d, i)
 	if err != nil {
 		return 0, fmt.Errorf("Invalid integer: '%s'", d)
 	}

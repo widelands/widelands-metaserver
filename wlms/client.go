@@ -95,7 +95,6 @@ func (c Client) State() State {
 }
 
 func (client *Client) Disconnect() error {
-	log.Printf("In Disconnect\n")
 	client.conn.Close()
 	if client.dataStream != nil {
 		close(client.dataStream)
@@ -105,7 +104,6 @@ func (client *Client) Disconnect() error {
 }
 
 func (client *Client) SendPacket(data ...interface{}) {
-	log.Printf("Sending to %s: %v\n", client.userName, data)
 	client.conn.Write(packet.New(data...))
 }
 
@@ -127,7 +125,6 @@ func (client Client) remoteIp() string {
 
 func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	client := newClient(conn)
-	log.Print("Starting Goroutine: DealWithNewConnection")
 	client.startToPingTimer.Reset(server.PingCycleTime())
 	client.timeoutTimer.Reset(server.ClientSendingTimeout())
 	client.waitingForPong = false
@@ -166,7 +163,6 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 					client.SendPacket("ERROR", cmdName, errString)
 				}
 			} else {
-				log.Printf("%s: Garbage packet %s", client.Name(), cmdName)
 				client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 				client.Disconnect()
 				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
@@ -185,7 +181,6 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 				client.Disconnect()
 				if client.pendingRelogin != nil {
 					client.pendingRelogin.SendPacket("RELOGIN")
-					log.Printf("client.pendingRelogin.state.String(): %v\n", client.pendingRelogin.state)
 					client.pendingRelogin.state = CONNECTED
 					// Replace the client.
 					server.AddClient(client.pendingRelogin)
@@ -204,22 +199,17 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	time.AfterFunc(server.ClientForgetTimeout(), func() {
 		server.RemoveClient(client)
 	})
-
-	log.Print("Ending Goroutine: DealWithNewConnection")
 }
 
 func (client *Client) readingLoop() {
-	log.Print("Starting Goroutine: readingLoop")
 	for {
 		pkg, err := packet.Read(client.conn)
 		if err != nil {
-			log.Printf("Error reading packet: %v\n", err)
 			break
 		}
 		client.dataStream <- pkg
 	}
 	client.Disconnect()
-	log.Print("Ending Goroutine: readingLoop")
 }
 
 func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
@@ -288,7 +278,7 @@ func (client *Client) HandleDISCONNECT(server *Server, pkg *packet.Packet) (stri
 	if err != nil {
 		return err.Error(), true
 	}
-	log.Printf("%s: leaving. Reason: '%s'", client.Name(), reason)
+	log.Printf("%s left. Reason: '%s'", client.Name(), reason)
 
 	server.RemoveClient(client)
 
@@ -350,6 +340,7 @@ func (client *Client) HandleLOGIN(server *Server, pkg *packet.Packet) (string, b
 	client.userName = userName
 	client.loginTime = time.Now()
 	client.state = CONNECTED
+	log.Printf("%s logged in.", userName)
 
 	client.SendPacket("LOGIN", userName, client.permissions.String())
 	client.SendPacket("TIME", int(time.Now().Unix()))
@@ -514,13 +505,9 @@ func (client *Client) HandleGAME_DISCONNECT(server *Server, pkg *packet.Packet) 
 	client.game = nil
 
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
-	log.Printf("client.Name(): %v\n", client.Name())
 	if game.Host() == client {
-		log.Printf("The Host() is leaving.")
 		server.RemoveGame(game)
 		server.BroadcastToConnectedClients("GAMES_UPDATE")
-	} else {
-		log.Printf("Someone is leaving.")
 	}
 	game.RemoveClient(client)
 

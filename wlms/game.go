@@ -2,7 +2,6 @@ package main
 
 import (
 	"container/list"
-	"log"
 	"time"
 )
 
@@ -33,7 +32,6 @@ func (game *Game) pingCycle(host *Client, server *Server) {
 		pinger := server.NewGamePinger(host)
 
 		success, ok := <-pinger.C
-		log.Printf("success: %v, ok: %v\n", success, ok)
 		if success && ok {
 			if game.state != CONNECTABLE {
 				if game.state == INITIAL_SETUP {
@@ -81,10 +79,7 @@ func (g Game) MaxClients() int {
 }
 
 func (g Game) Host() *Client {
-	host := g.clients.Front().Value.(*Client)
-
-	log.Printf("host.Name(): %v\n", host.Name())
-	return host
+	return g.clients.Front().Value.(*Client)
 }
 
 func (g *Game) AddClient(client *Client) {

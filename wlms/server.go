@@ -86,7 +86,6 @@ func (s *Server) NewGamePinger(client *Client) *GamePinger {
 }
 
 func (s *Server) mainLoop() error {
-	log.Print("Starting Goroutine: mainLoop")
 	for done := false; !done; {
 		select {
 		case conn, ok := <-s.acceptedConnections:
@@ -107,8 +106,6 @@ func (s *Server) mainLoop() error {
 			done = true
 		}
 	}
-	log.Print("Ending Goroutine: mainLoop")
-
 	return nil
 }
 
