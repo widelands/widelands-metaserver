@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"launchpad.net/wlmetaserver/wlms/packet"
 	"log"
 	"reflect"
@@ -43,7 +42,7 @@ const (
 
 type Client struct {
 	// The connection (net.Conn most likely) that let us talk to the other site.
-	conn io.ReadWriteCloser
+	conn ReadWriteCloserWithIp
 
 	// We always read one whole packet and send it over this to the consumer.
 	dataStream chan *packet.Packet
@@ -67,6 +66,9 @@ type Client struct {
 	// the buildId of Widelands executable that this client is using.
 	buildId string
 
+	// The game we are currently in. nil if not in game.
+	game *Game
+
 	// Various state variables needed for fulfilling the protocol.
 	startToPingTimer *time.Timer
 	timeoutTimer     *time.Timer
@@ -74,7 +76,7 @@ type Client struct {
 	pendingRelogin   *Client
 }
 
-func newClient(r io.ReadWriteCloser) *Client {
+func newClient(r ReadWriteCloserWithIp) *Client {
 	client := &Client{
 		conn:        r,
 		dataStream:  make(chan *packet.Packet, 10),
@@ -108,7 +110,17 @@ func (client Client) Name() string {
 	return client.userName
 }
 
-func DealWithNewConnection(conn io.ReadWriteCloser, server *Server) {
+func (client *Client) SetGame(game *Game) {
+	client.game = game
+}
+
+func (client Client) remoteIp() string {
+	addr := client.conn.RemoteAddr()
+	// NOCOM(sirver): this is likely not correct
+	return addr.String()
+}
+
+func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	client := newClient(conn)
 	log.Print("Starting Goroutine: DealWithNewConnection")
 	client.startToPingTimer = time.NewTimer(server.PingCycleTime())
@@ -210,9 +222,9 @@ func (client *Client) HandleCHAT(server *Server, pkg *packet.Packet) (string, bo
 	}
 
 	if len(receiver) == 0 {
-		server.broadcastToConnectedClients("CHAT", client.Name(), message, "public")
+		server.BroadcastToConnectedClients("CHAT", client.Name(), message, "public")
 	} else {
-		recv_client := server.isLoggedIn(receiver)
+		recv_client := server.HasClient(receiver)
 		if recv_client != nil {
 			recv_client.SendPacket("CHAT", client.Name(), message, "private")
 		}
@@ -230,7 +242,7 @@ func (client *Client) HandleMOTD(server *Server, pkg *packet.Packet) (string, bo
 		return "DEFICIENT_PERMISSION", false
 	}
 	server.SetMotd(message)
-	server.broadcastToConnectedClients("CHAT", "", server.Motd(), "system")
+	server.BroadcastToConnectedClients("CHAT", "", server.Motd(), "system")
 
 	return "", false
 }
@@ -244,7 +256,7 @@ func (client *Client) HandleANNOUNCEMENT(server *Server, pkg *packet.Packet) (st
 	if client.permissions != SUPERUSER {
 		return "DEFICIENT_PERMISSION", false
 	}
-	server.broadcastToConnectedClients("CHAT", "", message, "system")
+	server.BroadcastToConnectedClients("CHAT", "", message, "system")
 
 	return "", false
 }
@@ -287,7 +299,7 @@ func (client *Client) HandleLOGIN(server *Server, pkg *packet.Packet) (string, b
 	}
 
 	if isRegisteredOnServer {
-		if server.isLoggedIn(userName) != nil {
+		if server.HasClient(userName) != nil {
 			return "ALREADY_LOGGED_IN", true
 		}
 		if !server.UserDb().ContainsName(userName) {
@@ -303,7 +315,7 @@ func (client *Client) HandleLOGIN(server *Server, pkg *packet.Packet) (string, b
 		client.permissions = server.UserDb().Permissions(userName)
 	} else {
 		baseName := userName
-		for i := 1; server.UserDb().ContainsName(userName) || server.isLoggedIn(userName) != nil; i++ {
+		for i := 1; server.UserDb().ContainsName(userName) || server.HasClient(userName) != nil; i++ {
 			userName = fmt.Sprintf("%s%d", baseName, i)
 		}
 	}
@@ -317,7 +329,7 @@ func (client *Client) HandleLOGIN(server *Server, pkg *packet.Packet) (string, b
 	client.SendPacket("LOGIN", userName, client.permissions.String())
 	client.SendPacket("TIME", int(time.Now().Unix()))
 	server.AddClient(client)
-	server.broadcastToConnectedClients("CLIENTS_UPDATE")
+	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 
 	if len(server.Motd()) != 0 {
 		client.SendPacket("CHAT", "", server.Motd(), "system")
@@ -337,7 +349,7 @@ func (client *Client) HandleRELOGIN(server *Server, pkg *packet.Packet) (string,
 		return err.Error(), true
 	}
 
-	oldClient := server.isLoggedIn(userName)
+	oldClient := server.HasClient(userName)
 	if oldClient == nil {
 		return "NOT_LOGGED_IN", true
 	}
@@ -378,6 +390,96 @@ func (client *Client) HandleRELOGIN(server *Server, pkg *packet.Packet) (string,
 
 	oldClient.restartPingLoop(server.PingCycleTime())
 	oldClient.pendingRelogin = client
+
+	return "", false
+}
+
+func (client *Client) HandleGAME_OPEN(server *Server, pkg *packet.Packet) (string, bool) {
+	gameName, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), false
+	}
+
+	if server.HasGame(gameName) != nil {
+		return "GAME_EXISTS", false
+	}
+
+	maxPlayer, err := pkg.ReadInt()
+	if err != nil {
+		return err.Error(), false
+	}
+	game := NewGame(client, server, gameName, maxPlayer)
+	server.AddGame(game)
+
+	client.game = game
+	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+
+	return "", false
+}
+
+func (client *Client) HandleGAME_CONNECT(server *Server, pkg *packet.Packet) (string, bool) {
+	gameName, err := pkg.ReadString()
+	if err != nil {
+		return err.Error(), false
+	}
+
+	game := server.HasGame(gameName)
+	if game == nil {
+		return "NO_SUCH_GAME", false
+	}
+
+	if game.NrClients() == game.MaxClients() {
+		return "GAME_FULL", false
+	}
+
+	game.AddClient(client)
+	client.game = game
+
+	client.SendPacket("GAME_CONNECT", client.remoteIp())
+
+	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+
+	return "", false
+}
+
+func (client *Client) HandleCLIENTS(server *Server, pkg *packet.Packet) (string, bool) {
+	nrClients := server.NrClients()
+	data := make([]interface{}, 2+nrClients*5)
+
+	data[0] = "CLIENTS"
+	data[1] = nrClients
+	n := 2
+	server.ForeachClient(func(otherClient *Client) {
+		data[n+0] = otherClient.userName
+		data[n+1] = otherClient.buildId
+		if otherClient.game != nil {
+			data[n+2] = otherClient.game.Name()
+		} else {
+			data[n+2] = ""
+		}
+		data[n+3] = otherClient.permissions.String()
+		data[n+4] = ""
+		n += 5
+	})
+	client.SendPacket(data...)
+
+	return "", false
+}
+
+func (client *Client) HandleGAMES(server *Server, pkg *packet.Packet) (string, bool) {
+	nrGames := server.NrGames()
+	data := make([]interface{}, 2+nrGames*3)
+
+	data[0] = "GAMES"
+	data[1] = nrGames
+	n := 2
+	server.ForeachGame(func(game *Game) {
+		data[n+0] = game.Name()
+		data[n+1] = game.Host().buildId
+		data[n+2] = false // // NOCOM(sirver): mmh, what is this?
+		n += 3
+	})
+	client.SendPacket(data...)
 
 	return "", false
 }

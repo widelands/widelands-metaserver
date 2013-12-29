@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	. "launchpad.net/gocheck"
 	"launchpad.net/wlmetaserver/wlms/packet"
 	"log"
@@ -41,7 +40,7 @@ func SetupServer(c *C, nClients int) (*Server, []FakeConn) {
 	db.AddUser("SirVer", "123456", SUPERUSER)
 	db.AddUser("otto", "ottoiscool", REGISTERED)
 
-	acceptingConnections := make(chan io.ReadWriteCloser, 20)
+	acceptingConnections := make(chan ReadWriteCloserWithIp, 20)
 	cons := make([]FakeConn, nClients)
 	for i := range cons {
 		cons[i] = NewFakeConn(c)
@@ -69,16 +68,27 @@ func ExpectPacket(c *C, f FakeConn, expected ...interface{}) {
 	}
 }
 
+func ExpectPacketForAll(c *C, clients []FakeConn, expected ...interface{}) {
+	for _, client := range clients {
+		ExpectPacket(c, client, expected...)
+	}
+}
+
 func ExpectLoginAsUnregisteredWorks(c *C, f FakeConn, name string) {
-	SendPacket(f, "LOGIN", 0, name, "bzr1234[trunk]", false)
+	SendPacket(f, "LOGIN", 0, name, "build-16", false)
 	ExpectPacket(c, f, "LOGIN", name, "UNREGISTERED")
 	ExpectPacket(c, f, "TIME", Matching("\\d+"))
 	ExpectPacket(c, f, "CLIENTS_UPDATE")
 }
-
-func ExpectLoginAsRegisteredWorks(c *C, f FakeConn, name, password string) {
-	SendPacket(f, "LOGIN", 0, name, "bzr1234[trunk]", true, password)
-	ExpectPacket(c, f, "LOGIN", name, Matching("(REGISTERED|SUPERUSER)"))
+func ExpectLoginForOttoWorks(c *C, f FakeConn) {
+	SendPacket(f, "LOGIN", 0, "otto", "build-17", true, "ottoiscool")
+	ExpectPacket(c, f, "LOGIN", "otto", "REGISTERED")
+	ExpectPacket(c, f, "TIME", Matching("\\d+"))
+	ExpectPacket(c, f, "CLIENTS_UPDATE")
+}
+func ExpectLoginAsSirVerWorks(c *C, f FakeConn) {
+	SendPacket(f, "LOGIN", 0, "SirVer", "build-18", true, "123456")
+	ExpectPacket(c, f, "LOGIN", "SirVer", "SUPERUSER")
 	ExpectPacket(c, f, "TIME", Matching("\\d+"))
 	ExpectPacket(c, f, "CLIENTS_UPDATE")
 }
@@ -122,7 +132,7 @@ func (p *EndToEndSuite) TestFragmentedPackets(c *C) {
 func (s *EndToEndSuite) TestRegisteredUserIncorrectPassword(c *C) {
 	server, clients := SetupServer(c, 2)
 
-	SendPacket(clients[0], "LOGIN", 0, "SirVer", "bzr1234[trunk]", true, "23456")
+	SendPacket(clients[0], "LOGIN", 0, "SirVer", "build-18", true, "23456")
 	ExpectPacket(c, clients[0], "ERROR", "LOGIN", "WRONG_PASSWORD")
 
 	ExpectServerToShutdownCleanly(c, server)
@@ -131,7 +141,7 @@ func (s *EndToEndSuite) TestRegisteredUserIncorrectPassword(c *C) {
 func (s *EndToEndSuite) TestRegisteredUserNotExisting(c *C) {
 	server, clients := SetupServer(c, 2)
 
-	SendPacket(clients[0], "LOGIN", 0, "bluba", "bzr1234[trunk]", true, "123456")
+	SendPacket(clients[0], "LOGIN", 0, "bluba", "build-16", true, "123456")
 	ExpectPacket(c, clients[0], "ERROR", "LOGIN", "WRONG_PASSWORD")
 
 	ExpectServerToShutdownCleanly(c, server)
@@ -140,7 +150,7 @@ func (s *EndToEndSuite) TestRegisteredUserNotExisting(c *C) {
 func (s *EndToEndSuite) TestLoginAnonymouslyWorks(c *C) {
 	server, clients := SetupServer(c, 1)
 
-	SendPacket(clients[0], "LOGIN", 0, "testuser", "bzr1234[trunk]", false)
+	SendPacket(clients[0], "LOGIN", 0, "testuser", "build-16", false)
 
 	ExpectPacket(c, clients[0], "LOGIN", "testuser", "UNREGISTERED")
 	ExpectPacket(c, clients[0], "TIME", Matching("\\d+"))
@@ -157,7 +167,7 @@ func (s *EndToEndSuite) TestLoginAnonymouslyWorks(c *C) {
 func (s *EndToEndSuite) TestLoginUnknownProtocol(c *C) {
 	server, clients := SetupServer(c, 1)
 
-	SendPacket(clients[0], "LOGIN", 10, "testuser", "bzr1234[trunk]", false)
+	SendPacket(clients[0], "LOGIN", 10, "testuser", "build-16", false)
 	ExpectPacket(c, clients[0], "ERROR", "LOGIN", "UNSUPPORTED_PROTOCOL")
 
 	time.Sleep(5 * time.Millisecond)
@@ -169,7 +179,7 @@ func (s *EndToEndSuite) TestLoginUnknownProtocol(c *C) {
 func (s *EndToEndSuite) TestLoginWithKnownUserName(c *C) {
 	server, clients := SetupServer(c, 1)
 
-	SendPacket(clients[0], "LOGIN", 0, "SirVer", "bzr1234[trunk]", false)
+	SendPacket(clients[0], "LOGIN", 0, "SirVer", "build-18", false)
 	ExpectPacket(c, clients[0], "LOGIN", "SirVer1", "UNREGISTERED")
 	ExpectPacket(c, clients[0], "TIME", Matching("\\d+"))
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
@@ -182,7 +192,7 @@ func (s *EndToEndSuite) TestLoginOneWasAlreadyThere(c *C) {
 
 	ExpectLoginAsUnregisteredWorks(c, clients[0], "testuser")
 
-	SendPacket(clients[1], "LOGIN", 0, "testuser", "bzr1234[trunk]", false)
+	SendPacket(clients[1], "LOGIN", 0, "testuser", "build-16", false)
 	ExpectPacket(c, clients[1], "LOGIN", "testuser1", "UNREGISTERED")
 	ExpectPacket(c, clients[1], "TIME", Matching("\\d+"))
 	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
@@ -195,12 +205,12 @@ func (s *EndToEndSuite) TestLoginOneWasAlreadyThere(c *C) {
 func (s *EndToEndSuite) TestRegisteredUserCorrectPassword(c *C) {
 	server, clients := SetupServer(c, 2)
 
-	SendPacket(clients[0], "LOGIN", 0, "SirVer", "bzr1234[trunk]", true, "123456")
+	SendPacket(clients[0], "LOGIN", 0, "SirVer", "build-18", true, "123456")
 	ExpectPacket(c, clients[0], "LOGIN", "SirVer", "SUPERUSER")
 	ExpectPacket(c, clients[0], "TIME", Matching("\\d+"))
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 
-	SendPacket(clients[1], "LOGIN", 0, "otto", "bzr1234[trunk]", true, "ottoiscool")
+	SendPacket(clients[1], "LOGIN", 0, "otto", "build-17", true, "ottoiscool")
 	ExpectPacket(c, clients[1], "LOGIN", "otto", "REGISTERED")
 	ExpectPacket(c, clients[1], "TIME", Matching("\\d+"))
 	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
@@ -213,9 +223,9 @@ func (s *EndToEndSuite) TestRegisteredUserCorrectPassword(c *C) {
 func (s *EndToEndSuite) TestRegisteredUserAlreadyLoggedIn(c *C) {
 	server, clients := SetupServer(c, 2)
 
-	ExpectLoginAsRegisteredWorks(c, clients[0], "SirVer", "123456")
+	ExpectLoginAsSirVerWorks(c, clients[0])
 
-	SendPacket(clients[1], "LOGIN", 0, "SirVer", "bzr1234[trunk]", true, "123456")
+	SendPacket(clients[1], "LOGIN", 0, "SirVer", "build-18", true, "123456")
 	ExpectPacket(c, clients[1], "ERROR", "LOGIN", "ALREADY_LOGGED_IN")
 
 	ExpectServerToShutdownCleanly(c, server)
@@ -227,7 +237,7 @@ func (e *EndToEndSuite) TestReloginPingAndReply(c *C) {
 	server, clients := SetupServer(c, 2)
 	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
 
-	SendPacket(clients[1], "RELOGIN", 0, "bert", "bzr1234[trunk]", false)
+	SendPacket(clients[1], "RELOGIN", 0, "bert", "build-16", false)
 
 	ExpectPacket(c, clients[0], "PING")
 	SendPacket(clients[0], "PONG")
@@ -241,11 +251,11 @@ func (e *EndToEndSuite) TestReloginPingAndReply(c *C) {
 
 func (e *EndToEndSuite) TestReloginForNonAnonymous(c *C) {
 	server, clients := SetupServer(c, 2)
-	ExpectLoginAsRegisteredWorks(c, clients[0], "otto", "ottoiscool")
+	ExpectLoginForOttoWorks(c, clients[0])
 
 	server.SetPingCycleTime(5 * time.Millisecond)
 
-	SendPacket(clients[1], "RELOGIN", 0, "otto", "bzr1234[trunk]", true, "ottoiscool")
+	SendPacket(clients[1], "RELOGIN", 0, "otto", "build-17", true, "ottoiscool")
 	ExpectPacket(c, clients[0], "PING")
 
 	time.Sleep(6 * time.Millisecond)
@@ -268,7 +278,7 @@ func (e *EndToEndSuite) TestReloginPingAndNoReply(c *C) {
 	ExpectLoginAsUnregisteredWorks(c, clients[2], "ernie")
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 
-	SendPacket(clients[1], "RELOGIN", 0, "bert", "bzr1234[trunk]", false)
+	SendPacket(clients[1], "RELOGIN", 0, "bert", "build-16", false)
 
 	time.Sleep(6 * time.Millisecond)
 	ExpectPacket(c, clients[0], "PING")
@@ -293,7 +303,7 @@ func (e *EndToEndSuite) TestReloginPingAndNoReply(c *C) {
 func (e *EndToEndSuite) TestReloginNotLoggedIn(c *C) {
 	server, clients := SetupServer(c, 1)
 
-	SendPacket(clients[0], "RELOGIN", 0, "bert", "bzr1234[trunk]", false)
+	SendPacket(clients[0], "RELOGIN", 0, "bert", "build-16", false)
 	ExpectPacket(c, clients[0], "ERROR", "RELOGIN", "NOT_LOGGED_IN")
 	ExpectClosed(c, clients[0])
 
@@ -305,30 +315,30 @@ func (e *EndToEndSuite) TestReloginWrongInformations(c *C) {
 	server, clients := SetupServer(c, 10)
 
 	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
-	ExpectLoginAsRegisteredWorks(c, clients[1], "SirVer", "123456")
+	ExpectLoginAsSirVerWorks(c, clients[1])
 
 	// Wrong Proto
-	SendPacket(clients[2], "RELOGIN", 1, "bert", "bzr1234[trunk]", false)
+	SendPacket(clients[2], "RELOGIN", 1, "bert", "build-16", false)
 	ExpectPacket(c, clients[2], "ERROR", "RELOGIN", "WRONG_INFORMATION")
 	ExpectClosed(c, clients[2])
 
 	// Wrong buildid.
-	SendPacket(clients[3], "RELOGIN", 0, "bert", "bzr234[trunk]", false)
+	SendPacket(clients[3], "RELOGIN", 0, "bert", "build-10", false)
 	ExpectPacket(c, clients[3], "ERROR", "RELOGIN", "WRONG_INFORMATION")
 	ExpectClosed(c, clients[3])
 
 	// Claim we are registered
-	SendPacket(clients[4], "RELOGIN", 0, "bert", "bzr1234[trunk]", true, "123123")
+	SendPacket(clients[4], "RELOGIN", 0, "bert", "build-16", true, "123123")
 	ExpectPacket(c, clients[4], "ERROR", "RELOGIN", "WRONG_INFORMATION")
 	ExpectClosed(c, clients[4])
 
 	// Claim we are unregistered.
-	SendPacket(clients[5], "RELOGIN", 0, "SirVer", "bzr1234[trunk]", false)
+	SendPacket(clients[5], "RELOGIN", 0, "SirVer", "build-18", false)
 	ExpectPacket(c, clients[5], "ERROR", "RELOGIN", "WRONG_INFORMATION")
 	ExpectClosed(c, clients[5])
 
 	// Wrong password.
-	SendPacket(clients[6], "RELOGIN", 0, "SirVer", "bzr1234[trunk]", true, "13245")
+	SendPacket(clients[6], "RELOGIN", 0, "SirVer", "build-18", true, "13245")
 	ExpectPacket(c, clients[6], "ERROR", "RELOGIN", "WRONG_INFORMATION")
 	ExpectClosed(c, clients[6])
 
@@ -342,7 +352,7 @@ func (e *EndToEndSuite) TestDisconnect(c *C) {
 	server, clients := SetupServer(c, 2)
 
 	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
-	ExpectLoginAsRegisteredWorks(c, clients[1], "otto", "ottoiscool")
+	ExpectLoginForOttoWorks(c, clients[1])
 
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 	SendPacket(clients[0], "DISCONNECT", "Gotta fly now!")
@@ -464,8 +474,8 @@ func (s *EndToEndSuite) TestRegularPingCycle(c *C) {
 func (s *EndToEndSuite) TestMotd(c *C) {
 	server, clients := SetupServer(c, 3)
 
-	ExpectLoginAsRegisteredWorks(c, clients[0], "SirVer", "123456")
-	ExpectLoginAsRegisteredWorks(c, clients[1], "otto", "ottoiscool")
+	ExpectLoginAsSirVerWorks(c, clients[0])
+	ExpectLoginForOttoWorks(c, clients[1])
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 
 	// Check Superuser setting motd.
@@ -493,8 +503,8 @@ func (s *EndToEndSuite) TestMotd(c *C) {
 func (s *EndToEndSuite) TestAnnouncement(c *C) {
 	server, clients := SetupServer(c, 3)
 
-	ExpectLoginAsRegisteredWorks(c, clients[0], "SirVer", "123456")
-	ExpectLoginAsRegisteredWorks(c, clients[1], "otto", "ottoiscool")
+	ExpectLoginAsSirVerWorks(c, clients[0])
+	ExpectLoginForOttoWorks(c, clients[1])
 	ExpectLoginAsUnregisteredWorks(c, clients[2], "bert")
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
@@ -510,6 +520,260 @@ func (s *EndToEndSuite) TestAnnouncement(c *C) {
 	SendPacket(clients[2], "ANNOUNCEMENT", "Schnulz is cool!")
 	ExpectPacket(c, clients[1], "ERROR", "ANNOUNCEMENT", "DEFICIENT_PERMISSION")
 	ExpectPacket(c, clients[2], "ERROR", "ANNOUNCEMENT", "DEFICIENT_PERMISSION")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+// }}}
+// Test Game interaction {{{
+type FakePinger struct {
+	Send chan string
+	Recv chan string
+}
+type FakeGamePingerFactory struct {
+	pinger FakePinger
+}
+
+func (f FakeGamePingerFactory) New(client *Client) *GamePinger {
+	return &GamePinger{
+		Recv: f.pinger.Recv,
+		Send: f.pinger.Send,
+	}
+}
+
+func gameTestSetup(c *C) (*Server, []FakeConn, FakePinger) {
+	server, clients := SetupServer(c, 3)
+
+	pinger := FakePinger{
+		make(chan string, 5),
+		make(chan string, 5),
+	}
+	server.InjectGamePingCreator(FakeGamePingerFactory{pinger})
+	server.SetGamePingTimeout(5 * time.Millisecond)
+
+	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
+	ExpectLoginForOttoWorks(c, clients[1])
+	ExpectLoginAsSirVerWorks(c, clients[2])
+
+	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
+	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
+	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+	return server, clients, pinger
+}
+
+func (s *EndToEndSuite) TestCreateGameAndPingReply(c *C) {
+	server, clients, pinger := gameTestSetup(c)
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	SendPacket(clients[1], "CLIENTS")
+	ExpectPacket(c, clients[1], "CLIENTS", "3",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+
+	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
+	pinger.Recv <- NETCMD_METASERVER_PING
+
+	ExpectPacket(c, clients[0], "GAME_OPEN")
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+
+	SendPacket(clients[1], "CLIENTS")
+	ExpectPacket(c, clients[1], "CLIENTS", "3",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestCreateGameAndNoConnection(c *C) {
+	server, clients, pinger := gameTestSetup(c)
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
+	// No reply to game ping.
+	time.Sleep(6 * time.Millisecond)
+
+	ExpectPacket(c, clients[0], "ERROR", "GAME_OPEN", "GAME_TIMEOUT")
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+
+	SendPacket(clients[2], "CLIENTS")
+	SendPacket(clients[2], "GAMES")
+	ExpectPacket(c, clients[2], "CLIENTS", "3",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+	ExpectPacket(c, clients[2], "GAMES", "1",
+		"my cool game", "build-16", "false")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestCreateGameTwicePrePing(c *C) {
+	server, clients, pinger := gameTestSetup(c)
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	SendPacket(clients[1], "GAME_OPEN", "my cool game", 12)
+	ExpectPacket(c, clients[1], "ERROR", "GAME_OPEN", "GAME_EXISTS")
+
+	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
+	pinger.Recv <- NETCMD_METASERVER_PING
+
+	ExpectPacket(c, clients[0], "GAME_OPEN")
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+
+	SendPacket(clients[2], "CLIENTS")
+	ExpectPacket(c, clients[2], "CLIENTS", "3",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestCreateGameTwicePostPing(c *C) {
+	server, clients, pinger := gameTestSetup(c)
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
+	pinger.Recv <- NETCMD_METASERVER_PING
+
+	ExpectPacket(c, clients[0], "GAME_OPEN")
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+
+	SendPacket(clients[1], "GAME_OPEN", "my cool game", 12)
+	ExpectPacket(c, clients[1], "ERROR", "GAME_OPEN", "GAME_EXISTS")
+
+	SendPacket(clients[2], "CLIENTS")
+	ExpectPacket(c, clients[2], "CLIENTS", "3",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestCreateGameAndNoFirstPingReply(c *C) {
+	server, clients, _ := gameTestSetup(c)
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	time.Sleep(6 * time.Millisecond)
+
+	ExpectPacket(c, clients[0], "ERROR", "GAME_OPEN", "GAME_TIMEOUT")
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+
+	SendPacket(clients[2], "CLIENTS")
+	ExpectPacket(c, clients[2], "CLIENTS", "3",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+
+	SendPacket(clients[2], "GAMES")
+	ExpectPacket(c, clients[2], "GAMES", "1",
+		"my cool game", "build-16", "false")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestCreateGameAndNoSecondPingReply(c *C) {
+	server, clients, pinger := gameTestSetup(c)
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
+	pinger.Recv <- NETCMD_METASERVER_PING
+
+	ExpectPacket(c, clients[0], "GAME_OPEN")
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+
+	time.Sleep(6 * time.Millisecond)
+
+	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
+
+	// Now we do not answer
+	time.Sleep(6 * time.Millisecond)
+
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+
+	SendPacket(clients[2], "CLIENTS")
+	ExpectPacket(c, clients[2], "CLIENTS", "3",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+
+	SendPacket(clients[2], "GAMES")
+	ExpectPacket(c, clients[2], "GAMES", "0")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestJoinGame(c *C) {
+	server, clients, _ := gameTestSetup(c)
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	SendPacket(clients[1], "GAME_CONNECT", "my cool game")
+	ExpectPacket(c, clients[1], "GAME_CONNECT", "192.168.0.0")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	SendPacket(clients[2], "CLIENTS")
+	ExpectPacket(c, clients[2], "CLIENTS", "3",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "my cool game", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestJoinFullGame(c *C) {
+	server, clients, _ := gameTestSetup(c)
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 1)
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	SendPacket(clients[1], "GAME_CONNECT", "my cool game")
+	ExpectPacket(c, clients[1], "ERROR", "GAME_CONNECT", "GAME_FULL")
+
+	SendPacket(clients[2], "CLIENTS")
+	ExpectPacket(c, clients[2], "CLIENTS", "3",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestJoinNonexistingGame(c *C) {
+	server, clients, _ := gameTestSetup(c)
+
+	SendPacket(clients[1], "GAME_CONNECT", "my cool game")
+	ExpectPacket(c, clients[1], "ERROR", "GAME_CONNECT", "NO_SUCH_GAME")
+
+	SendPacket(clients[2], "CLIENTS")
+	ExpectPacket(c, clients[2], "CLIENTS", "3",
+		"bert", "build-16", "", "UNREGISTERED", "",
+		"otto", "build-17", "", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
 
 	ExpectServerToShutdownCleanly(c, server)
 }

@@ -13,7 +13,7 @@ func (a FakeAddr) Network() string {
 	return "TestingNetwork"
 }
 func (a FakeAddr) String() string {
-	return "TestingString"
+	return "192.168.0.0"
 }
 
 type FakeConn struct {
@@ -73,9 +73,7 @@ func (f FakeConn) Close() error {
 	*f.gotClosed = true
 	return nil
 }
-func (f FakeConn) LocalAddr() net.Addr {
-	return FakeAddr{}
-}
+
 func (f FakeConn) RemoteAddr() net.Addr {
 	return FakeAddr{}
 }
