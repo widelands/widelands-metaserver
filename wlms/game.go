@@ -24,57 +24,49 @@ type Game struct {
 }
 
 type GamePinger struct {
-	Send        chan string
-	Recv        chan string
-	PingTimeout time.Duration
+	C chan bool
 }
 
-func (game *Game) pingCycle(pinger *GamePinger, server *Server) {
-	timer := time.NewTimer(0) // fires immediately
-	waitingForPong := false
-	for done := false; !done; {
-		select {
-		case data := <-pinger.Recv:
-			if data == NETCMD_METASERVER_PING {
-				waitingForPong = false
-				if game.state == NOT_CONNECTABLE {
-					game.state = CONNECTABLE
-					game.Host().SendPacket("GAME_OPEN")
-					server.BroadcastToConnectedClients("GAMES_UPDATE")
-				}
-				timer.Reset(pinger.PingTimeout)
-				// NOCOM(sirver): Change type of game to verified?
-			} else {
-				done = true
+func (game *Game) pingCycle(host *Client, server *Server) {
+	for server.HasGame(game.Name()) == game {
+		log.Printf("ALIVE 1\n")
+		pinger := server.NewGamePinger(host)
+		log.Printf("ALIVE 2\n")
+
+		success, ok := <-pinger.C
+		log.Printf("ALIVE 3\n")
+		if success && ok {
+			log.Printf("ALIVE 4\n")
+			if game.state == NOT_CONNECTABLE {
+				game.state = CONNECTABLE
+				game.Host().SendPacket("GAME_OPEN")
+				server.BroadcastToConnectedClients("GAMES_UPDATE")
 			}
-		case <-timer.C:
-			if !waitingForPong {
-				pinger.Send <- NETCMD_METASERVER_PING
-				waitingForPong = true
-				timer.Reset(pinger.PingTimeout)
+			time.Sleep(server.GamePingTimeout())
+		} else {
+			log.Printf("ALIVE 5\n")
+			if game.state == NOT_CONNECTABLE {
+				game.Host().SendPacket("ERROR", "GAME_OPEN", "GAME_TIMEOUT")
+				server.BroadcastToConnectedClients("GAMES_UPDATE")
 			} else {
-				if game.state == NOT_CONNECTABLE {
-					game.Host().SendPacket("ERROR", "GAME_OPEN", "GAME_TIMEOUT")
-					done = true
-				} else {
-					server.RemoveGame(game)
-				}
+				server.RemoveGame(game)
 			}
 		}
+		log.Printf("ALIVE 6\n")
 	}
-	server.BroadcastToConnectedClients("GAMES_UPDATE")
 }
 
 func NewGame(host *Client, server *Server, gameName string, maxClients int) *Game {
-	game := Game{
+	game := &Game{
 		clients:    list.New(),
 		name:       gameName,
 		maxClients: maxClients,
 		state:      NOT_CONNECTABLE,
 	}
 	game.clients.PushFront(host)
-	go game.pingCycle(server.NewGamePinger(host), server)
-	return &game
+	server.AddGame(game)
+	go game.pingCycle(host, server)
+	return game
 }
 
 func (g Game) Name() string {

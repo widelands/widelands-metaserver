@@ -578,27 +578,19 @@ func (s *EndToEndSuite) TestAnnouncement(c *C) {
 
 // }}}
 // Test Game interaction {{{
-type FakePinger struct {
-	Send chan string
-	Recv chan string
-}
 type FakeGamePingerFactory struct {
-	pinger FakePinger
+	pinger GamePinger
 }
 
-func (f FakeGamePingerFactory) New(client *Client) *GamePinger {
-	return &GamePinger{
-		Recv: f.pinger.Recv,
-		Send: f.pinger.Send,
-	}
+func (f FakeGamePingerFactory) New(client *Client, timeout time.Duration) *GamePinger {
+	return &f.pinger
 }
 
-func gameTestSetup(c *C, loginThirdConnection bool) (*Server, []FakeConn, FakePinger) {
+func gameTestSetup(c *C, loginThirdConnection bool) (*Server, []FakeConn, GamePinger) {
 	server, clients := SetupServer(c, 3)
 
-	pinger := FakePinger{
-		make(chan string, 5),
-		make(chan string, 5),
+	pinger := GamePinger{
+		make(chan bool),
 	}
 	server.InjectGamePingCreator(FakeGamePingerFactory{pinger})
 	server.SetGamePingTimeout(5 * time.Millisecond)
@@ -630,8 +622,7 @@ func (s *EndToEndSuite) TestCreateGameAndPingReply(c *C) {
 		"otto", "build-17", "", "REGISTERED", "",
 		"SirVer", "build-18", "", "SUPERUSER", "")
 
-	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
-	pinger.Recv <- NETCMD_METASERVER_PING
+	pinger.C <- true
 
 	ExpectPacket(c, clients[0], "GAME_OPEN")
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -652,7 +643,8 @@ func (s *EndToEndSuite) TestCreateGameAndNoConnection(c *C) {
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
 	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
 
-	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
+	pinger.C <- false
+
 	// No reply to game ping.
 	time.Sleep(6 * time.Millisecond)
 
@@ -681,8 +673,7 @@ func (s *EndToEndSuite) TestCreateGameTwicePrePing(c *C) {
 	SendPacket(clients[1], "GAME_OPEN", "my cool game", 12)
 	ExpectPacket(c, clients[1], "ERROR", "GAME_OPEN", "GAME_EXISTS")
 
-	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
-	pinger.Recv <- NETCMD_METASERVER_PING
+	pinger.C <- true
 
 	ExpectPacket(c, clients[0], "GAME_OPEN")
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -703,8 +694,7 @@ func (s *EndToEndSuite) TestCreateGameTwicePostPing(c *C) {
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
 	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
 
-	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
-	pinger.Recv <- NETCMD_METASERVER_PING
+	pinger.C <- true
 
 	ExpectPacket(c, clients[0], "GAME_OPEN")
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -722,13 +712,14 @@ func (s *EndToEndSuite) TestCreateGameTwicePostPing(c *C) {
 }
 
 func (s *EndToEndSuite) TestCreateGameAndNoFirstPingReply(c *C) {
-	server, clients, _ := gameTestSetup(c, true)
+	server, clients, pinger := gameTestSetup(c, true)
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
 	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
 
 	time.Sleep(6 * time.Millisecond)
+	pinger.C <- false
 
 	ExpectPacket(c, clients[0], "ERROR", "GAME_OPEN", "GAME_TIMEOUT")
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -753,18 +744,12 @@ func (s *EndToEndSuite) TestCreateGameAndNoSecondPingReply(c *C) {
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
 	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
 
-	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
-	pinger.Recv <- NETCMD_METASERVER_PING
+	pinger.C <- true
 
 	ExpectPacket(c, clients[0], "GAME_OPEN")
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
 
-	time.Sleep(6 * time.Millisecond)
-
-	c.Check(<-pinger.Send, Equals, NETCMD_METASERVER_PING)
-
-	// Now we do not answer
-	time.Sleep(6 * time.Millisecond)
+	pinger.C <- false
 
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
 

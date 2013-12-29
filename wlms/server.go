@@ -29,7 +29,7 @@ type Server struct {
 }
 
 type GamePingFactory interface {
-	New(client *Client) *GamePinger
+	New(client *Client, timeout time.Duration) *GamePinger
 }
 
 func (s *Server) SetClientSendingTimeout(d time.Duration) {
@@ -82,9 +82,7 @@ func (s *Server) WaitTillShutdown() {
 
 // NOCOM(sirver): this is only good for testing.
 func (s *Server) NewGamePinger(client *Client) *GamePinger {
-	pinger := s.gamePingCreator.New(client)
-	pinger.PingTimeout = s.gamePingTimeout
-	return pinger
+	return s.gamePingCreator.New(client, s.gamePingTimeout)
 }
 
 func (s *Server) mainLoop() error {
@@ -159,6 +157,7 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 
 func (s *Server) AddGame(game *Game) {
 	s.games.PushBack(game)
+	// NOCOM(sirver): do not broadcast implicitly
 	s.BroadcastToConnectedClients("GAMES_UPDATE")
 }
 
@@ -228,9 +227,38 @@ type RealGamePingFactory struct {
 	server *Server
 }
 
-func (gpf RealGamePingFactory) New(client *Client) *GamePinger {
-	// NOCOM(sirver): Implement this
-	return nil
+func (gpf RealGamePingFactory) New(client *Client, timeout time.Duration) *GamePinger {
+	// NOCOM(sirver): need timing
+	pinger := &GamePinger{
+		make(chan bool),
+	}
+
+	go func() {
+		conn, err := net.Dial("tcp", net.JoinHostPort(client.remoteIp(), "7396"))
+		defer conn.Close()
+
+		if err != nil {
+			pinger.C <- false
+			return
+		}
+		conn.SetDeadline(time.Now().Add(timeout))
+		n, err := conn.Write([]byte(NETCMD_METASERVER_PING))
+		if err != nil || n != len(NETCMD_METASERVER_PING) {
+			pinger.C <- false
+			return
+		}
+
+		conn.SetDeadline(time.Now().Add(timeout))
+		data := make([]byte, len(NETCMD_METASERVER_PING))
+		n, err = conn.Read(data)
+		if err != nil || string(data) != NETCMD_METASERVER_PING {
+			pinger.C <- false
+			return
+		}
+		pinger.C <- true
+	}()
+
+	return pinger
 }
 
 func (server *Server) InjectGamePingCreator(gpf GamePingFactory) {

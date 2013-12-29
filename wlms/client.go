@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"launchpad.net/wlmetaserver/wlms/packet"
 	"log"
+	"net"
 	"reflect"
 	"strings"
 	"time"
@@ -117,9 +118,11 @@ func (client *Client) SetGame(game *Game) {
 }
 
 func (client Client) remoteIp() string {
-	addr := client.conn.RemoteAddr()
-	// NOCOM(sirver): this is likely not correct
-	return addr.String()
+	host, _, err := net.SplitHostPort(client.conn.RemoteAddr().String())
+	if err != nil {
+		log.Fatalf("%s is not valid.", client.remoteIp())
+	}
+	return host
 }
 
 func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
@@ -444,7 +447,6 @@ func (client *Client) HandleGAME_OPEN(server *Server, pkg *packet.Packet) (strin
 		return err.Error(), false
 	}
 	game := NewGame(client, server, gameName, maxPlayer)
-	server.AddGame(game)
 
 	client.game = game
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")

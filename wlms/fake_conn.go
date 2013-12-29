@@ -13,7 +13,7 @@ func (a FakeAddr) Network() string {
 	return "TestingNetwork"
 }
 func (a FakeAddr) String() string {
-	return "192.168.0.0"
+	return "192.168.0.0:1234"
 }
 
 type FakeConn struct {
