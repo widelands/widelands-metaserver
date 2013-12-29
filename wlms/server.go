@@ -214,13 +214,13 @@ func listeningLoop(C chan ReadWriteCloserWithIp) {
 	}
 }
 
-func CreateServer() *Server {
+func CreateServer(db UserDb) *Server {
 	// NOCOM(sirver): should use a proper database connection or flat file
 	C := make(chan ReadWriteCloserWithIp)
 	// NOCOM(sirver): no way to stop the listening loop right now
 	go listeningLoop(C)
 
-	return CreateServerUsing(C, NewInMemoryDb())
+	return CreateServerUsing(C, db)
 }
 
 type RealGamePingFactory struct {

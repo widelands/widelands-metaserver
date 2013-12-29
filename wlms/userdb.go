@@ -1,9 +1,19 @@
 package main
 
+import (
+	"crypto/sha1"
+	"database/sql"
+	"encoding/base64"
+	_ "github.com/ziutek/mymysql/godrv"
+	"io"
+	"log"
+)
+
 type UserDb interface {
 	ContainsName(name string) bool
 	PasswordCorrect(name, password string) bool
 	Permissions(name string) Permissions
+	Close()
 }
 
 type User struct {
@@ -40,4 +50,77 @@ func (i InMemoryUserDb) Permissions(name string) Permissions {
 		return UNREGISTERED
 	}
 	return i.users[name].permissions
+}
+
+func (i InMemoryUserDb) Close() {
+}
+
+type SqlDatabase struct {
+	db *sql.DB
+}
+
+func NewMySqlDatabase(database, user, password string) *SqlDatabase {
+	con, err := sql.Open("mymysql", database+"/"+user+"/"+password)
+	if err != nil {
+		log.Fatal("Could not connect to database.")
+	}
+	return &SqlDatabase{
+		con,
+	}
+}
+
+func (db *SqlDatabase) Close() {
+	if db.db != nil {
+		db.Close()
+		db.db = nil
+	}
+}
+func (db *SqlDatabase) ContainsName(name string) bool {
+	var id int
+	err := db.db.QueryRow("select id from auth_user where username=?", name).Scan(&id)
+	if err == sql.ErrNoRows {
+		return false
+	}
+	return true
+}
+
+func (db *SqlDatabase) PasswordCorrect(name, password string) bool {
+	var id int64
+	if err := db.db.QueryRow("select id from auth_user where username=?", name).Scan(&id); err != nil {
+		return false
+	}
+	var golden string
+	if err := db.db.QueryRow("select password from wlggz_ggzauth where user_id=?", id).Scan(&golden); err != nil {
+		return false
+	}
+
+	h := sha1.New()
+	io.WriteString(h, password)
+	givenHash := h.Sum(nil)
+
+	goldenHash, err := base64.StdEncoding.DecodeString(golden)
+	if err != nil {
+		return false
+	}
+	return string(goldenHash) == string(givenHash)
+}
+
+func (db *SqlDatabase) Permissions(name string) Permissions {
+	var id int64
+	if err := db.db.QueryRow("select id from auth_user where username=?", name).Scan(&id); err != nil {
+		return UNREGISTERED
+	}
+	var permission int64
+	if err := db.db.QueryRow("select permissions from wlggz_ggzauth where user_id=?", id).Scan(&permission); err != nil {
+		return UNREGISTERED
+	}
+
+	switch permission {
+	case 127:
+		return SUPERUSER
+	case 7:
+		return REGISTERED
+	default:
+		return UNREGISTERED
+	}
 }
