@@ -10,8 +10,8 @@ const NETCMD_METASERVER_PING = "\x00\x03@"
 type GameState int
 
 const (
-	PROBING GameState = iota
-	OPEN
+	NOT_CONNECTABLE GameState = iota
+	CONNECTABLE
 )
 
 type Game struct {
@@ -36,8 +36,8 @@ func (game *Game) pingCycle(pinger *GamePinger, server *Server) {
 		case data := <-pinger.Recv:
 			if data == NETCMD_METASERVER_PING {
 				waitingForPong = false
-				if game.state == PROBING {
-					game.state = OPEN
+				if game.state == NOT_CONNECTABLE {
+					game.state = CONNECTABLE
 					game.Host().SendPacket("GAME_OPEN")
 					server.BroadcastToConnectedClients("GAMES_UPDATE")
 				}
@@ -52,7 +52,7 @@ func (game *Game) pingCycle(pinger *GamePinger, server *Server) {
 				waitingForPong = true
 				timer.Reset(pinger.PingTimeout)
 			} else {
-				if game.state == PROBING {
+				if game.state == NOT_CONNECTABLE {
 					game.Host().SendPacket("ERROR", "GAME_OPEN", "GAME_TIMEOUT")
 					done = true
 				} else {
@@ -69,7 +69,7 @@ func NewGame(host *Client, server *Server, gameName string, maxClients int) *Gam
 		clients:    list.New(),
 		name:       gameName,
 		maxClients: maxClients,
-		state:      PROBING,
+		state:      NOT_CONNECTABLE,
 	}
 	game.clients.PushFront(host)
 	go game.pingCycle(server.NewGamePinger(host), server)
@@ -78,6 +78,10 @@ func NewGame(host *Client, server *Server, gameName string, maxClients int) *Gam
 
 func (g Game) Name() string {
 	return g.name
+}
+
+func (g Game) State() GameState {
+	return g.state
 }
 
 func (g Game) MaxClients() int {

@@ -493,7 +493,7 @@ func (client *Client) HandleGAMES(server *Server, pkg *packet.Packet) (string, b
 	server.ForeachGame(func(game *Game) {
 		data[n+0] = game.Name()
 		data[n+1] = game.Host().buildId
-		data[n+2] = false // // NOCOM(sirver): mmh, what is this?
+		data[n+2] = game.State() == CONNECTABLE
 		n += 3
 	})
 	client.SendPacket(data...)
