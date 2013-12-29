@@ -96,7 +96,7 @@ func ExpectLoginAsSirVerWorks(c *C, f FakeConn) {
 func ExpectServerToShutdownCleanly(c *C, server *Server) {
 	server.Shutdown()
 	server.WaitTillShutdown()
-	c.Assert(server.NrClients(), Equals, 0)
+	c.Assert(server.NrActiveClients(), Equals, 0)
 }
 
 // Test Packet decoding {{{
@@ -127,7 +127,6 @@ func (p *EndToEndSuite) TestFragmentedPackets(c *C) {
 }
 
 // }}}
-
 // Test Login {{{
 func (s *EndToEndSuite) TestRegisteredUserIncorrectPassword(c *C) {
 	server, clients := SetupServer(c, 2)
@@ -158,7 +157,7 @@ func (s *EndToEndSuite) TestLoginAnonymouslyWorks(c *C) {
 	clients[0].Close()
 
 	time.Sleep(5 * time.Millisecond)
-	c.Assert(server.NrClients(), Equals, 0)
+	c.Assert(server.NrActiveClients(), Equals, 0)
 
 	ExpectServerToShutdownCleanly(c, server)
 	ExpectClosed(c, clients[0])
@@ -171,7 +170,7 @@ func (s *EndToEndSuite) TestLoginUnknownProtocol(c *C) {
 	ExpectPacket(c, clients[0], "ERROR", "LOGIN", "UNSUPPORTED_PROTOCOL")
 
 	time.Sleep(5 * time.Millisecond)
-	c.Assert(server.NrClients(), Equals, 0)
+	c.Assert(server.NrActiveClients(), Equals, 0)
 
 	ExpectServerToShutdownCleanly(c, server)
 }
@@ -231,7 +230,7 @@ func (s *EndToEndSuite) TestRegisteredUserAlreadyLoggedIn(c *C) {
 	ExpectServerToShutdownCleanly(c, server)
 }
 
-/// }}}
+// }}}
 // Test Relogin {{{
 func (e *EndToEndSuite) TestReloginPingAndReply(c *C) {
 	server, clients := SetupServer(c, 2)
@@ -245,7 +244,7 @@ func (e *EndToEndSuite) TestReloginPingAndReply(c *C) {
 	ExpectPacket(c, clients[1], "ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
 	ExpectClosed(c, clients[1])
 
-	c.Assert(server.NrClients(), Equals, 1)
+	c.Assert(server.NrActiveClients(), Equals, 1)
 	ExpectServerToShutdownCleanly(c, server)
 }
 
@@ -266,7 +265,7 @@ func (e *EndToEndSuite) TestReloginForNonAnonymous(c *C) {
 	ExpectPacket(c, clients[1], "RELOGIN")
 	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
 
-	c.Assert(server.NrClients(), Equals, 1)
+	c.Assert(server.NrActiveClients(), Equals, 1)
 	ExpectServerToShutdownCleanly(c, server)
 }
 
@@ -296,7 +295,7 @@ func (e *EndToEndSuite) TestReloginPingAndNoReply(c *C) {
 
 	ExpectPacket(c, clients[2], "CLIENTS_UPDATE")
 
-	c.Assert(server.NrClients(), Equals, 2)
+	c.Assert(server.NrActiveClients(), Equals, 2)
 	ExpectServerToShutdownCleanly(c, server)
 }
 
@@ -307,7 +306,7 @@ func (e *EndToEndSuite) TestReloginNotLoggedIn(c *C) {
 	ExpectPacket(c, clients[0], "ERROR", "RELOGIN", "NOT_LOGGED_IN")
 	ExpectClosed(c, clients[0])
 
-	c.Assert(server.NrClients(), Equals, 0)
+	c.Assert(server.NrActiveClients(), Equals, 0)
 	ExpectServerToShutdownCleanly(c, server)
 }
 
@@ -342,7 +341,60 @@ func (e *EndToEndSuite) TestReloginWrongInformations(c *C) {
 	ExpectPacket(c, clients[6], "ERROR", "RELOGIN", "WRONG_INFORMATION")
 	ExpectClosed(c, clients[6])
 
-	c.Assert(server.NrClients(), Equals, 2)
+	c.Assert(server.NrActiveClients(), Equals, 2)
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (e *EndToEndSuite) TestRelogWhileInGame(c *C) {
+	server, clients, _ := gameTestSetup(c, false)
+
+	server.SetPingCycleTime(20 * time.Millisecond)
+	server.SetGamePingTimeout(5 * time.Second) // Not interesting in this.
+
+	ExpectForTwo := func(data ...interface{}) {
+		for i := 0; i < 2; i++ {
+			ExpectPacket(c, clients[i], data...)
+		}
+	}
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectForTwo("GAMES_UPDATE")
+	ExpectForTwo("CLIENTS_UPDATE")
+
+	SendPacket(clients[1], "GAME_CONNECT", "my cool game")
+	ExpectPacket(c, clients[1], "GAME_CONNECT", "192.168.0.0")
+	ExpectForTwo("CLIENTS_UPDATE")
+
+	// Syncronize ping timers.
+	SendPacket(clients[0], "PONG")
+	SendPacket(clients[1], "PONG")
+	time.Sleep(6 * time.Millisecond)
+	ExpectForTwo("PING")
+
+	SendPacket(clients[1], "PONG") // Only reply for one user.
+	time.Sleep(3 * time.Millisecond)
+	SendPacket(clients[1], "PONG") // Only reply for one user.
+	time.Sleep(3 * time.Millisecond)
+
+	// Connection was terminated for old user
+	ExpectPacket(c, clients[0], "DISCONNECT", "CLIENT_TIMEOUT")
+
+	// Make sure we see the one player getting disconnected.
+	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+	ExpectPacket(c, clients[1], "PING")
+	SendPacket(clients[1], "PONG")
+
+	// Relogin.
+	SendPacket(clients[2], "RELOGIN", 0, "bert", "build-16", false)
+	ExpectPacket(c, clients[2], "RELOGIN")
+	ExpectPacket(c, clients[2], "CLIENTS_UPDATE")
+	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+
+	SendPacket(clients[1], "CLIENTS")
+	ExpectPacket(c, clients[1], "CLIENTS", "2",
+		"otto", "build-17", "my cool game", "REGISTERED", "",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "")
+
 	ExpectServerToShutdownCleanly(c, server)
 }
 
@@ -360,7 +412,7 @@ func (e *EndToEndSuite) TestDisconnect(c *C) {
 
 	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
 
-	c.Assert(server.NrClients(), Equals, 1)
+	c.Assert(server.NrActiveClients(), Equals, 1)
 	ExpectServerToShutdownCleanly(c, server)
 }
 
@@ -427,7 +479,7 @@ func (s *EndToEndSuite) TestClientCanTimeout(c *C) {
 	time.Sleep(5 * time.Millisecond)
 
 	ExpectClosed(c, clients[0])
-	c.Assert(server.NrClients(), Equals, 0)
+	c.Assert(server.NrActiveClients(), Equals, 0)
 
 	ExpectServerToShutdownCleanly(c, server)
 }
@@ -464,7 +516,7 @@ func (s *EndToEndSuite) TestRegularPingCycle(c *C) {
 	time.Sleep(1 * time.Millisecond)
 	ExpectClosed(c, clients[0])
 
-	c.Assert(server.NrClients(), Equals, 0)
+	c.Assert(server.NrActiveClients(), Equals, 0)
 
 	ExpectServerToShutdownCleanly(c, server)
 }
@@ -541,7 +593,7 @@ func (f FakeGamePingerFactory) New(client *Client) *GamePinger {
 	}
 }
 
-func gameTestSetup(c *C) (*Server, []FakeConn, FakePinger) {
+func gameTestSetup(c *C, loginThirdConnection bool) (*Server, []FakeConn, FakePinger) {
 	server, clients := SetupServer(c, 3)
 
 	pinger := FakePinger{
@@ -553,16 +605,20 @@ func gameTestSetup(c *C) (*Server, []FakeConn, FakePinger) {
 
 	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
 	ExpectLoginForOttoWorks(c, clients[1])
-	ExpectLoginAsSirVerWorks(c, clients[2])
 
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
-	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
-	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+
+	if loginThirdConnection {
+		ExpectLoginAsSirVerWorks(c, clients[2])
+		ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
+		ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+	}
+
 	return server, clients, pinger
 }
 
 func (s *EndToEndSuite) TestCreateGameAndPingReply(c *C) {
-	server, clients, pinger := gameTestSetup(c)
+	server, clients, pinger := gameTestSetup(c, true)
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -590,7 +646,7 @@ func (s *EndToEndSuite) TestCreateGameAndPingReply(c *C) {
 }
 
 func (s *EndToEndSuite) TestCreateGameAndNoConnection(c *C) {
-	server, clients, pinger := gameTestSetup(c)
+	server, clients, pinger := gameTestSetup(c, true)
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -616,7 +672,7 @@ func (s *EndToEndSuite) TestCreateGameAndNoConnection(c *C) {
 }
 
 func (s *EndToEndSuite) TestCreateGameTwicePrePing(c *C) {
-	server, clients, pinger := gameTestSetup(c)
+	server, clients, pinger := gameTestSetup(c, true)
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -641,7 +697,7 @@ func (s *EndToEndSuite) TestCreateGameTwicePrePing(c *C) {
 }
 
 func (s *EndToEndSuite) TestCreateGameTwicePostPing(c *C) {
-	server, clients, pinger := gameTestSetup(c)
+	server, clients, pinger := gameTestSetup(c, true)
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -666,7 +722,7 @@ func (s *EndToEndSuite) TestCreateGameTwicePostPing(c *C) {
 }
 
 func (s *EndToEndSuite) TestCreateGameAndNoFirstPingReply(c *C) {
-	server, clients, _ := gameTestSetup(c)
+	server, clients, _ := gameTestSetup(c, true)
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -691,7 +747,7 @@ func (s *EndToEndSuite) TestCreateGameAndNoFirstPingReply(c *C) {
 }
 
 func (s *EndToEndSuite) TestCreateGameAndNoSecondPingReply(c *C) {
-	server, clients, pinger := gameTestSetup(c)
+	server, clients, pinger := gameTestSetup(c, true)
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -725,7 +781,7 @@ func (s *EndToEndSuite) TestCreateGameAndNoSecondPingReply(c *C) {
 }
 
 func (s *EndToEndSuite) TestJoinGame(c *C) {
-	server, clients, _ := gameTestSetup(c)
+	server, clients, _ := gameTestSetup(c, true)
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -745,7 +801,7 @@ func (s *EndToEndSuite) TestJoinGame(c *C) {
 }
 
 func (s *EndToEndSuite) TestJoinFullGame(c *C) {
-	server, clients, _ := gameTestSetup(c)
+	server, clients, _ := gameTestSetup(c, true)
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 1)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -764,7 +820,7 @@ func (s *EndToEndSuite) TestJoinFullGame(c *C) {
 }
 
 func (s *EndToEndSuite) TestJoinNonexistingGame(c *C) {
-	server, clients, _ := gameTestSetup(c)
+	server, clients, _ := gameTestSetup(c, true)
 
 	SendPacket(clients[1], "GAME_CONNECT", "my cool game")
 	ExpectPacket(c, clients[1], "ERROR", "GAME_CONNECT", "NO_SUCH_GAME")
@@ -779,10 +835,11 @@ func (s *EndToEndSuite) TestJoinNonexistingGame(c *C) {
 }
 
 // }}}
-
 // Test Game Starting {{{
 func (s *EndToEndSuite) TestStartGame(c *C) {
-	server, clients, _ := gameTestSetup(c)
+	server, clients, _ := gameTestSetup(c, true)
+
+	server.SetGamePingTimeout(5 * time.Second) // Not interesting in this.
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -810,3 +867,5 @@ func (s *EndToEndSuite) TestStartGame(c *C) {
 
 	ExpectServerToShutdownCleanly(c, server)
 }
+
+// }}}

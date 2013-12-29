@@ -24,6 +24,7 @@ type Server struct {
 	clientSendingTimeout time.Duration
 	pingCycleTime        time.Duration
 	gamePingTimeout      time.Duration
+	clientForgetTimeout  time.Duration
 	gamePingCreator      GamePingFactory
 }
 
@@ -50,6 +51,13 @@ func (s Server) GamePingTimeout() time.Duration {
 }
 func (s *Server) SetGamePingTimeout(v time.Duration) {
 	s.gamePingTimeout = v
+}
+
+func (s Server) ClientForgetTimeout() time.Duration {
+	return s.clientForgetTimeout
+}
+func (s *Server) SetClientForgetTimeout(v time.Duration) {
+	s.clientForgetTimeout = v
 }
 
 func (s Server) Motd() string {
@@ -129,13 +137,23 @@ func (s *Server) HasClient(name string) *Client {
 	return nil
 }
 
-func (s *Server) NrClients() int {
-	return s.clients.Len()
+func (s *Server) NrActiveClients() int {
+	count := 0
+	for e := s.clients.Front(); e != nil; e = e.Next() {
+		if e.Value.(*Client).State() == CONNECTED {
+			count++
+		}
+	}
+	return count
 }
 
-func (s Server) ForeachClient(callback func(*Client)) {
+func (s Server) ForeachActiveClient(callback func(*Client)) {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
-		callback(e.Value.(*Client))
+		client := e.Value.(*Client)
+		if client.State() != CONNECTED {
+			continue
+		}
+		callback(client)
 	}
 }
 
@@ -230,6 +248,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		clientSendingTimeout: time.Second * 30,
 		pingCycleTime:        time.Second * 15,
 		gamePingTimeout:      time.Second * 10,
+		clientForgetTimeout:  time.Minute * 5,
 	}
 	server.gamePingCreator = RealGamePingFactory{server}
 

@@ -37,7 +37,7 @@ type State int
 const (
 	HANDSHAKE State = iota
 	CONNECTED
-	DISCONNECTED
+	RECENTLY_DISCONNECTED
 )
 
 type Client struct {
@@ -78,10 +78,12 @@ type Client struct {
 
 func newClient(r ReadWriteCloserWithIp) *Client {
 	client := &Client{
-		conn:        r,
-		dataStream:  make(chan *packet.Packet, 10),
-		state:       HANDSHAKE,
-		permissions: UNREGISTERED,
+		conn:             r,
+		dataStream:       make(chan *packet.Packet, 10),
+		state:            HANDSHAKE,
+		permissions:      UNREGISTERED,
+		startToPingTimer: time.NewTimer(time.Hour * 1),
+		timeoutTimer:     time.NewTimer(time.Hour * 1),
 	}
 	go client.readingLoop()
 	return client
@@ -123,14 +125,17 @@ func (client Client) remoteIp() string {
 func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	client := newClient(conn)
 	log.Print("Starting Goroutine: DealWithNewConnection")
-	client.startToPingTimer = time.NewTimer(server.PingCycleTime())
-	client.timeoutTimer = time.NewTimer(server.ClientSendingTimeout())
+	client.startToPingTimer.Reset(server.PingCycleTime())
+	client.timeoutTimer.Reset(server.ClientSendingTimeout())
 	client.waitingForPong = false
 
 	for done := false; !done; {
 		select {
 		case pkg, ok := <-client.dataStream:
 			if !ok {
+				client.state = RECENTLY_DISCONNECTED
+				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+				client.Disconnect()
 				done = true
 				break
 			}
@@ -161,19 +166,30 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 				log.Printf("%s: Garbage packet %s", client.Name(), cmdName)
 				client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 				client.Disconnect()
+				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 				done = true
 			}
 		case <-client.timeoutTimer.C:
 			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
+			client.state = RECENTLY_DISCONNECTED
+			client.Disconnect()
+			server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 			done = true
 		case <-client.startToPingTimer.C:
 			if client.waitingForPong {
+				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
+				client.state = RECENTLY_DISCONNECTED
+				client.Disconnect()
 				if client.pendingRelogin != nil {
 					client.pendingRelogin.SendPacket("RELOGIN")
+					log.Printf("client.pendingRelogin.state.String(): %v\n", client.pendingRelogin.state)
 					client.pendingRelogin.state = CONNECTED
+					// Replace the client.
 					server.AddClient(client.pendingRelogin)
+					server.RemoveClient(client)
+				} else {
+					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 				}
-				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 				done = true
 				break
 			}
@@ -182,7 +198,10 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	}
 	client.Disconnect()
 
-	server.RemoveClient(client)
+	time.AfterFunc(server.ClientForgetTimeout(), func() {
+		server.RemoveClient(client)
+	})
+
 	log.Print("Ending Goroutine: DealWithNewConnection")
 }
 
@@ -201,7 +220,7 @@ func (client *Client) readingLoop() {
 }
 
 func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
-	if client.State() != HANDSHAKE {
+	if client.state == CONNECTED {
 		client.SendPacket("PING")
 		client.waitingForPong = true
 	}
@@ -267,6 +286,9 @@ func (client *Client) HandleDISCONNECT(server *Server, pkg *packet.Packet) (stri
 		return err.Error(), true
 	}
 	log.Printf("%s: leaving. Reason: '%s'", client.Name(), reason)
+
+	server.RemoveClient(client)
+
 	return "", true
 }
 
@@ -388,8 +410,21 @@ func (client *Client) HandleRELOGIN(server *Server, pkg *packet.Packet) (string,
 		return "WRONG_INFORMATION", true
 	}
 
-	oldClient.restartPingLoop(server.PingCycleTime())
-	oldClient.pendingRelogin = client
+	client.protocolVersion = oldClient.protocolVersion
+	client.buildId = oldClient.buildId
+	client.userName = oldClient.userName
+	client.loginTime = oldClient.loginTime
+	client.game = oldClient.game
+	if oldClient.state == RECENTLY_DISCONNECTED {
+		client.SendPacket("RELOGIN")
+		client.state = CONNECTED
+		server.AddClient(client)
+		server.RemoveClient(oldClient)
+	} else {
+		client.state = HANDSHAKE
+		oldClient.restartPingLoop(server.PingCycleTime())
+		oldClient.pendingRelogin = client
+	}
 
 	return "", false
 }
@@ -445,6 +480,8 @@ func (client *Client) HandleGAME_CONNECT(server *Server, pkg *packet.Packet) (st
 func (client *Client) HandleGAME_START(server *Server, pkg *packet.Packet) (string, bool) {
 	if client.game == nil {
 		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
+		client.Disconnect()
+		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 		return "", true
 	}
 
@@ -460,13 +497,13 @@ func (client *Client) HandleGAME_START(server *Server, pkg *packet.Packet) (stri
 }
 
 func (client *Client) HandleCLIENTS(server *Server, pkg *packet.Packet) (string, bool) {
-	nrClients := server.NrClients()
+	nrClients := server.NrActiveClients()
 	data := make([]interface{}, 2+nrClients*5)
 
 	data[0] = "CLIENTS"
 	data[1] = nrClients
 	n := 2
-	server.ForeachClient(func(otherClient *Client) {
+	server.ForeachActiveClient(func(otherClient *Client) {
 		data[n+0] = otherClient.userName
 		data[n+1] = otherClient.buildId
 		if otherClient.game != nil {
