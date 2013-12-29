@@ -779,3 +779,34 @@ func (s *EndToEndSuite) TestJoinNonexistingGame(c *C) {
 }
 
 // }}}
+
+// Test Game Starting {{{
+func (s *EndToEndSuite) TestStartGame(c *C) {
+	server, clients, _ := gameTestSetup(c)
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	SendPacket(clients[1], "GAME_CONNECT", "my cool game")
+	ExpectPacket(c, clients[1], "GAME_CONNECT", "192.168.0.0")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	// Try to start a game without being in one.
+	SendPacket(clients[2], "GAME_START")
+	ExpectPacket(c, clients[2], "ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
+	ExpectClosed(c, clients[2])
+	clients = clients[:2]
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	// Try starting without being a host.
+	SendPacket(clients[1], "GAME_START")
+	ExpectPacket(c, clients[1], "ERROR", "GAME_START", "DEFICIENT_PERMISSION")
+
+	// And a successful start.
+	SendPacket(clients[0], "GAME_START")
+	ExpectPacket(c, clients[0], "GAME_START")
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+
+	ExpectServerToShutdownCleanly(c, server)
+}

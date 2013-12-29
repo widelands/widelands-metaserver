@@ -442,6 +442,23 @@ func (client *Client) HandleGAME_CONNECT(server *Server, pkg *packet.Packet) (st
 	return "", false
 }
 
+func (client *Client) HandleGAME_START(server *Server, pkg *packet.Packet) (string, bool) {
+	if client.game == nil {
+		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
+		return "", true
+	}
+
+	if client.game.Host() != client {
+		return "DEFICIENT_PERMISSION", false
+	}
+
+	client.SendPacket("GAME_START")
+
+	server.BroadcastToConnectedClients("GAMES_UPDATE")
+
+	return "", false
+}
+
 func (client *Client) HandleCLIENTS(server *Server, pkg *packet.Packet) (string, bool) {
 	nrClients := server.NrClients()
 	data := make([]interface{}, 2+nrClients*5)
