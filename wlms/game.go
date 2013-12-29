@@ -2,6 +2,7 @@ package main
 
 import (
 	"container/list"
+	"log"
 	"time"
 )
 
@@ -89,7 +90,10 @@ func (g Game) MaxClients() int {
 }
 
 func (g Game) Host() *Client {
-	return g.clients.Front().Value.(*Client)
+	host := g.clients.Front().Value.(*Client)
+
+	log.Printf("host.Name(): %v\n", host.Name())
+	return host
 }
 
 func (g *Game) AddClient(client *Client) {

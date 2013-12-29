@@ -482,6 +482,7 @@ func (client *Client) HandleGAME_START(server *Server, pkg *packet.Packet) (stri
 		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 		client.Disconnect()
 		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+		client.state = RECENTLY_DISCONNECTED
 		return "", true
 	}
 
@@ -492,6 +493,34 @@ func (client *Client) HandleGAME_START(server *Server, pkg *packet.Packet) (stri
 	client.SendPacket("GAME_START")
 
 	server.BroadcastToConnectedClients("GAMES_UPDATE")
+
+	return "", false
+}
+
+// NOCOM(sirver): must only have one client for each user.
+// NOCOM(sirver): add in a _
+func (client *Client) HandleGAME_DISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
+	if client.game == nil {
+		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
+		client.Disconnect()
+		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+		client.state = RECENTLY_DISCONNECTED
+		return "", true
+	}
+
+	game := client.game
+	client.game = nil
+
+	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+	log.Printf("client.Name(): %v\n", client.Name())
+	if game.Host() == client {
+		log.Printf("The Host() is leaving.")
+		server.RemoveGame(game)
+		server.BroadcastToConnectedClients("GAMES_UPDATE")
+	} else {
+		log.Printf("Someone is leaving.")
+	}
+	game.RemoveClient(client)
 
 	return "", false
 }

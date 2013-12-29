@@ -869,3 +869,69 @@ func (s *EndToEndSuite) TestStartGame(c *C) {
 }
 
 // }}}
+
+// Test Game Leaving {{{
+func gameLeavingSetup(c *C, loginThirdConnection bool) (*Server, []FakeConn) {
+	server, clients, _ := gameTestSetup(c, true)
+
+	server.SetGamePingTimeout(5 * time.Second) // Not interesting in this.
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	SendPacket(clients[1], "GAME_CONNECT", "my cool game")
+	ExpectPacket(c, clients[1], "GAME_CONNECT", "192.168.0.0")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	return server, clients
+}
+func (s *EndToEndSuite) TestGameNonHostLeaving(c *C) {
+	server, clients := gameLeavingSetup(c, true)
+
+	SendPacket(clients[1], "GAME_DISCONNECT")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	SendPacket(clients[2], "CLIENTS")
+	ExpectPacket(c, clients[2], "CLIENTS", "3",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestGameHostLeaving(c *C) {
+	server, clients := gameLeavingSetup(c, true)
+
+	SendPacket(clients[0], "GAME_DISCONNECT")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+
+	SendPacket(clients[2], "CLIENTS")
+	ExpectPacket(c, clients[2], "CLIENTS", "3",
+		"bert", "build-16", "", "UNREGISTERED", "",
+		"otto", "build-17", "my cool game", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestGameLeavingNotInGame(c *C) {
+	server, clients := gameLeavingSetup(c, true)
+
+	SendPacket(clients[2], "GAME_DISCONNECT")
+	ExpectPacket(c, clients[2], "ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
+	ExpectClosed(c, clients[2])
+	clients = clients[:2]
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	SendPacket(clients[1], "CLIENTS")
+	ExpectPacket(c, clients[1], "CLIENTS", "2",
+		"bert", "build-16", "my cool game", "UNREGISTERED", "",
+		"otto", "build-17", "my cool game", "REGISTERED", "")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+// }}}
