@@ -235,12 +235,12 @@ func (gpf RealGamePingFactory) New(client *Client, timeout time.Duration) *GameP
 
 	go func() {
 		conn, err := net.Dial("tcp", net.JoinHostPort(client.remoteIp(), "7396"))
-		defer conn.Close()
-
 		if err != nil {
 			pinger.C <- false
 			return
 		}
+		defer conn.Close()
+
 		conn.SetDeadline(time.Now().Add(timeout))
 		n, err := conn.Write([]byte(NETCMD_METASERVER_PING))
 		if err != nil || n != len(NETCMD_METASERVER_PING) {

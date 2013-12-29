@@ -11,6 +11,7 @@ const NETCMD_METASERVER_PING = "\x00\x03@"
 type GameState int
 
 const (
+	INITIAL_SETUP   GameState = iota
 	NOT_CONNECTABLE GameState = iota
 	CONNECTABLE
 )
@@ -29,30 +30,28 @@ type GamePinger struct {
 
 func (game *Game) pingCycle(host *Client, server *Server) {
 	for server.HasGame(game.Name()) == game {
-		log.Printf("ALIVE 1\n")
 		pinger := server.NewGamePinger(host)
-		log.Printf("ALIVE 2\n")
 
 		success, ok := <-pinger.C
-		log.Printf("ALIVE 3\n")
+		log.Printf("success: %v, ok: %v\n", success, ok)
 		if success && ok {
-			log.Printf("ALIVE 4\n")
-			if game.state == NOT_CONNECTABLE {
-				game.state = CONNECTABLE
-				game.Host().SendPacket("GAME_OPEN")
+			if game.state != CONNECTABLE {
+				if game.state == INITIAL_SETUP {
+					game.Host().SendPacket("GAME_OPEN")
+				}
 				server.BroadcastToConnectedClients("GAMES_UPDATE")
 			}
-			time.Sleep(server.GamePingTimeout())
+			game.state = CONNECTABLE
 		} else {
-			log.Printf("ALIVE 5\n")
-			if game.state == NOT_CONNECTABLE {
+			if game.state == INITIAL_SETUP {
+				game.state = NOT_CONNECTABLE
 				game.Host().SendPacket("ERROR", "GAME_OPEN", "GAME_TIMEOUT")
 				server.BroadcastToConnectedClients("GAMES_UPDATE")
-			} else {
+			} else if game.state != NOT_CONNECTABLE {
 				server.RemoveGame(game)
 			}
 		}
-		log.Printf("ALIVE 6\n")
+		time.Sleep(server.GamePingTimeout())
 	}
 }
 
@@ -61,7 +60,7 @@ func NewGame(host *Client, server *Server, gameName string, maxClients int) *Gam
 		clients:    list.New(),
 		name:       gameName,
 		maxClients: maxClients,
-		state:      NOT_CONNECTABLE,
+		state:      INITIAL_SETUP,
 	}
 	game.clients.PushFront(host)
 	server.AddGame(game)
