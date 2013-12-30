@@ -91,6 +91,7 @@ func (client *Client) Disconnect() {
 		close(client.dataStream)
 		client.dataStream = nil
 	}
+	client.state = RECENTLY_DISCONNECTED
 }
 
 func (client *Client) SendPacket(data ...interface{}) {
@@ -107,9 +108,8 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 		select {
 		case pkg, ok := <-client.dataStream:
 			if !ok {
-				client.state = RECENTLY_DISCONNECTED
-				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 				client.Disconnect()
+				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 				done = true
 				break
 			}
@@ -144,14 +144,12 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			}
 		case <-client.timeoutTimer.C:
 			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
-			client.state = RECENTLY_DISCONNECTED
 			client.Disconnect()
 			server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 			done = true
 		case <-client.startToPingTimer.C:
 			if client.waitingForPong {
 				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
-				client.state = RECENTLY_DISCONNECTED
 				client.Disconnect()
 				if client.pendingRelogin != nil {
 					client.pendingRelogin.successfulRelogin(server, client)
@@ -429,7 +427,6 @@ func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) (str
 		// NOCOM(#sirver): disconnect could call set state?
 		client.Disconnect()
 		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
-		client.state = RECENTLY_DISCONNECTED
 		return "", true
 	}
 
@@ -449,7 +446,6 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 		client.Disconnect()
 		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
-		client.state = RECENTLY_DISCONNECTED
 		return "", true
 	}
 
