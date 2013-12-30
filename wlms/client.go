@@ -77,6 +77,16 @@ type Client struct {
 	pendingRelogin   *Client
 }
 
+type CmdError interface{}
+
+type CmdPacketError struct {
+	What string
+}
+type CriticalCmdPacketError struct {
+	What string
+}
+type InvalidPacketError struct{}
+
 func (c Client) State() State {
 	return c.state
 }
@@ -136,21 +146,28 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			}
 
 			handlerFunc := reflect.ValueOf(client).MethodByName(strings.Join([]string{"Handle_", cmdName}, ""))
+			pkgErr := CmdError(InvalidPacketError{})
 			if handlerFunc.IsValid() {
-				handlerFunc := handlerFunc.Interface().(func(*Server, *packet.Packet) (string, bool))
-				errString, done := handlerFunc(server, pkg)
-				if errString != "" {
-					client.SendPacket("ERROR", cmdName, errString)
-				}
-				// NOCOM(#sirver): kill done
-				if done {
-					client.Disconnect()
-				}
-			} else {
-				client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
-				client.Disconnect()
-				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+				handlerFunc := handlerFunc.Interface().(func(*Server, *packet.Packet) CmdError)
+				pkgErr = handlerFunc(server, pkg)
 			}
+			if pkgErr != nil {
+				switch pkgErr := pkgErr.(type) {
+				case CmdPacketError:
+					client.SendPacket("ERROR", cmdName, pkgErr.What)
+				case CriticalCmdPacketError:
+					client.SendPacket("ERROR", cmdName, pkgErr.What)
+					client.Disconnect()
+					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+				case InvalidPacketError:
+					client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
+					client.Disconnect()
+					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+				default:
+					log.Fatal("Unknown error type returned by handler function.")
+				}
+			}
+
 		case <-client.timeoutTimer.C:
 			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 			client.Disconnect()
@@ -220,10 +237,10 @@ func (newClient *Client) successfulRelogin(server *Server, oldClient *Client) {
 	server.RemoveClient(oldClient)
 }
 
-func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 	var message, receiver string
 	if err := pkg.Unpack(&message, &receiver); err != nil {
-		return err.Error(), false
+		return CmdPacketError{err.Error()}
 	}
 
 	// Sanitize message.
@@ -237,77 +254,75 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) (string, b
 			recv_client.SendPacket("CHAT", client.Name(), message, "private")
 		}
 	}
-	return "", false
+	return nil
 }
 
-func (client *Client) Handle_MOTD(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_MOTD(server *Server, pkg *packet.Packet) CmdError {
 	var message string
 	if err := pkg.Unpack(&message); err != nil {
-		return err.Error(), false
+		return CmdPacketError{err.Error()}
 	}
 
 	if client.permissions != SUPERUSER {
-		return "DEFICIENT_PERMISSION", false
+		return CmdPacketError{"DEFICIENT_PERMISSION"}
 	}
 	server.SetMotd(message)
 	server.BroadcastToConnectedClients("CHAT", "", server.Motd(), "system")
-
-	return "", false
+	return nil
 }
 
-func (client *Client) Handle_ANNOUNCEMENT(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_ANNOUNCEMENT(server *Server, pkg *packet.Packet) CmdError {
 	var message string
 	if err := pkg.Unpack(&message); err != nil {
-		return err.Error(), false
+		return CmdPacketError{err.Error()}
 	}
 
 	if client.permissions != SUPERUSER {
-		return "DEFICIENT_PERMISSION", false
+		return CmdPacketError{"DEFICIENT_PERMISSION"}
 	}
 	server.BroadcastToConnectedClients("CHAT", "", message, "system")
-
-	return "", false
+	return nil
 }
 
-func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) CmdError {
 	var reason string
 	if err := pkg.Unpack(&reason); err != nil {
-		return err.Error(), false
+		return CmdPacketError{err.Error()}
 	}
 	log.Printf("%s left. Reason: '%s'", client.Name(), reason)
 
 	server.RemoveClient(client)
-
-	return "", true
+	client.Disconnect()
+	return nil
 }
 
-func (client *Client) Handle_PONG(server *Server, pkg *packet.Packet) (string, bool) {
-	return "", false
+func (client *Client) Handle_PONG(server *Server, pkg *packet.Packet) CmdError {
+	return nil
 }
 
-func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) (string, bool) {
+func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 	var isRegisteredOnServer bool
 	if err := pkg.Unpack(&c.protocolVersion, &c.userName, &c.buildId, &isRegisteredOnServer); err != nil {
-		return err.Error(), true
+		return CriticalCmdPacketError{err.Error()}
 	}
 
 	if c.protocolVersion != 0 {
-		return "UNSUPPORTED_PROTOCOL", true
+		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
 
 	if isRegisteredOnServer {
 		if server.HasClient(c.userName) != nil {
-			return "ALREADY_LOGGED_IN", true
+			return CriticalCmdPacketError{"ALREADY_LOGGED_IN"}
 		}
 		if !server.UserDb().ContainsName(c.userName) {
-			return "WRONG_PASSWORD", true
+			return CriticalCmdPacketError{"WRONG_PASSWORD"}
 		}
 		password, err := pkg.ReadString()
 		if err != nil {
-			return err.Error(), true
+			return CriticalCmdPacketError{err.Error()}
 		}
 		if !server.UserDb().PasswordCorrect(c.userName, password) {
-			return "WRONG_PASSWORD", true
+			return CriticalCmdPacketError{"WRONG_PASSWORD"}
 		}
 		c.permissions = server.UserDb().Permissions(c.userName)
 	} else {
@@ -329,20 +344,20 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) (string, bool)
 	if len(server.Motd()) != 0 {
 		c.SendPacket("CHAT", "", server.Motd(), "system")
 	}
-	return "", false
+	return nil
 }
 
-func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdError {
 	var isRegisteredOnServer bool
 	var protocolVersion int
 	var userName, buildId string
 	if err := pkg.Unpack(&protocolVersion, &userName, &buildId, &isRegisteredOnServer); err != nil {
-		return err.Error(), true
+		return CriticalCmdPacketError{err.Error()}
 	}
 
 	oldClient := server.HasClient(userName)
 	if oldClient == nil {
-		return "NOT_LOGGED_IN", true
+		return CriticalCmdPacketError{"NOT_LOGGED_IN"}
 	}
 
 	informationMatches :=
@@ -352,7 +367,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) (string
 	if isRegisteredOnServer {
 		password, err := pkg.ReadString()
 		if err != nil {
-			return err.Error(), true
+			return CriticalCmdPacketError{err.Error()}
 		}
 		if oldClient.permissions == UNREGISTERED || !server.UserDb().PasswordCorrect(userName, password) {
 			informationMatches = false
@@ -362,7 +377,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) (string
 	}
 
 	if !informationMatches {
-		return "WRONG_INFORMATION", true
+		return CriticalCmdPacketError{"WRONG_INFORMATION"}
 	}
 
 	client.loginTime = oldClient.loginTime
@@ -378,38 +393,37 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) (string
 		oldClient.restartPingLoop(server.PingCycleTime())
 		oldClient.pendingRelogin = client
 	}
-	return "", false
+	return nil
 }
 
-func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdError {
 	var gameName string
 	var maxPlayer int
 	if err := pkg.Unpack(&gameName, &maxPlayer); err != nil {
-		return err.Error(), false
+		return CmdPacketError{err.Error()}
 	}
 	if server.HasGame(gameName) != nil {
-		return "GAME_EXISTS", false
+		return CmdPacketError{"GAME_EXISTS"}
 	}
 	client.game = NewGame(client.Name(), server, gameName, maxPlayer)
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 
 	log.Printf("%s hosts %s.", client.userName, gameName)
-
-	return "", false
+	return nil
 }
 
-func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) CmdError {
 	gameName, err := pkg.ReadString()
 	if err != nil {
-		return err.Error(), false
+		return CmdPacketError{err.Error()}
 	}
 
 	game := server.HasGame(gameName)
 	if game == nil {
-		return "NO_SUCH_GAME", false
+		return CmdPacketError{"NO_SUCH_GAME"}
 	}
 	if game.NrPlayers() == game.MaxPlayers() {
-		return "GAME_FULL", false
+		return CmdPacketError{"GAME_FULL"}
 	}
 
 	game.AddPlayer(client.Name())
@@ -419,36 +433,27 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) (s
 
 	client.game = game
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
-
-	return "", false
+	return nil
 }
 
-func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) CmdError {
 	if client.game == nil {
-		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
-		// NOCOM(#sirver): disconnect could call set state?
-		client.Disconnect()
-		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
-		return "", true
+		return InvalidPacketError{}
 	}
 
 	if client.game.Host() != client.Name() {
-		return "DEFICIENT_PERMISSION", false
+		return CmdPacketError{"DEFICIENT_PERMISSION"}
 	}
 
 	client.SendPacket("GAME_START")
 	server.BroadcastToConnectedClients("GAMES_UPDATE")
 	log.Printf("%s has started.", client.game.Name())
-
-	return "", false
+	return nil
 }
 
-func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet) CmdError {
 	if client.game == nil {
-		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
-		client.Disconnect()
-		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
-		return "", true
+		return InvalidPacketError{}
 	}
 
 	// NOCOM(#sirver): Add a SetGame(server)
@@ -463,11 +468,10 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 		server.RemoveGame(game)
 	}
 	game.RemovePlayer(client.Name())
-
-	return "", false
+	return nil
 }
 
-func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdError {
 	nrClients := server.NrActiveClients()
 	data := make([]interface{}, 2+nrClients*5)
 
@@ -487,11 +491,10 @@ func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) (string
 		n += 5
 	})
 	client.SendPacket(data...)
-
-	return "", false
+	return nil
 }
 
-func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError {
 	nrGames := server.NrGames()
 	data := make([]interface{}, 2+nrGames*3)
 
@@ -506,6 +509,5 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) (string, 
 		n += 3
 	})
 	client.SendPacket(data...)
-
-	return "", false
+	return nil
 }
