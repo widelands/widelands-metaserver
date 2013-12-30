@@ -36,6 +36,5 @@ func main() {
 	}
 	defer db.Close()
 
-	s := CreateServer(db)
-	s.WaitTillShutdown()
+	RunServer(db)
 }

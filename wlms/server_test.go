@@ -92,7 +92,7 @@ func ExpectLoginAsSirVerWorks(c *C, f FakeConn) {
 }
 
 func ExpectServerToShutdownCleanly(c *C, server *Server) {
-	server.Shutdown()
+	server.InitiateShutdown()
 	server.WaitTillShutdown()
 	c.Assert(server.NrActiveClients(), Equals, 0)
 }

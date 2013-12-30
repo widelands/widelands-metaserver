@@ -34,18 +34,18 @@ type GamePingFactory interface {
 	New(client *Client, timeout time.Duration) *GamePinger
 }
 
-func (s *Server) SetClientSendingTimeout(d time.Duration) {
-	s.clientSendingTimeout = d
-}
 func (s Server) ClientSendingTimeout() time.Duration {
 	return s.clientSendingTimeout
 }
-
-func (s *Server) SetPingCycleTime(d time.Duration) {
-	s.pingCycleTime = d
+func (s *Server) SetClientSendingTimeout(d time.Duration) {
+	s.clientSendingTimeout = d
 }
+
 func (s Server) PingCycleTime() time.Duration {
 	return s.pingCycleTime
+}
+func (s *Server) SetPingCycleTime(d time.Duration) {
+	s.pingCycleTime = d
 }
 
 func (s Server) GamePingTimeout() time.Duration {
@@ -73,7 +73,7 @@ func (s Server) UserDb() UserDb {
 	return s.user_db
 }
 
-func (s *Server) Shutdown() error {
+func (s *Server) InitiateShutdown() error {
 	s.shutdownServer <- true
 	return nil
 }
@@ -86,30 +86,6 @@ func (s *Server) NewGamePinger(client *Client) *GamePinger {
 	return s.gamePingCreator.New(client, s.gamePingTimeout)
 }
 
-func (s *Server) mainLoop() error {
-	for done := false; !done; {
-		select {
-		case conn, ok := <-s.acceptedConnections:
-			if !ok {
-				done = true
-			} else {
-				// The client will register itself if it feels the need.
-				go DealWithNewConnection(conn, s)
-			}
-		case <-s.shutdownServer:
-			for s.clients.Len() > 0 {
-				e := s.clients.Front()
-				e.Value.(*Client).Disconnect()
-				s.clients.Remove(e)
-			}
-			close(s.acceptedConnections)
-			s.serverHasShutdown <- true
-			done = true
-		}
-	}
-	return nil
-}
-
 func (s *Server) AddClient(client *Client) {
 	s.clients.PushBack(client)
 }
@@ -119,6 +95,7 @@ func (s *Server) RemoveClient(client *Client) {
 		if e.Value.(*Client) == client {
 			s.clients.Remove(e)
 			log.Printf("Removing client %s.", client.Name())
+			// NOCOM(sirver): this should not broadcast here.
 			s.BroadcastToConnectedClients("CLIENTS_UPDATE")
 		}
 	}
@@ -165,6 +142,7 @@ func (s *Server) RemoveGame(game *Game) {
 		if e.Value.(*Game) == game {
 			log.Printf("Removing game %s.", game.Name())
 			s.games.Remove(e)
+			// NOCOM(sirver): consider if you want to broadcast here
 			s.BroadcastToConnectedClients("GAMES_UPDATE")
 		}
 	}
@@ -199,28 +177,25 @@ func (s *Server) BroadcastToConnectedClients(data ...interface{}) {
 	}
 }
 
-func listeningLoop(C chan ReadWriteCloserWithIp) {
-	ln, err := net.Listen("tcp", ":7395") // TODO(sirver): softcode this
+func RunServer(db UserDb) {
+	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer ln.Close()
 
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			break
-		}
-		C <- conn
-	}
-}
-
-func CreateServer(db UserDb) *Server {
-	// NOCOM(sirver): should use a proper database connection or flat file
 	C := make(chan ReadWriteCloserWithIp)
-	// NOCOM(sirver): no way to stop the listening loop right now
-	go listeningLoop(C)
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				break
+			}
+			C <- conn
+		}
+	}()
 
-	return CreateServerUsing(C, db)
+	CreateServerUsing(C, db).WaitTillShutdown()
 }
 
 type RealGamePingFactory struct {
@@ -228,11 +203,9 @@ type RealGamePingFactory struct {
 }
 
 func (gpf RealGamePingFactory) New(client *Client, timeout time.Duration) *GamePinger {
-	// NOCOM(sirver): need timing
-	pinger := &GamePinger{
-		make(chan bool),
-	}
+	pinger := &GamePinger{make(chan bool)}
 
+	data := make([]byte, len(NETCMD_METASERVER_PING))
 	go func() {
 		conn, err := net.Dial("tcp", net.JoinHostPort(client.remoteIp(), "7396"))
 		if err != nil {
@@ -249,8 +222,7 @@ func (gpf RealGamePingFactory) New(client *Client, timeout time.Duration) *GameP
 		}
 
 		conn.SetDeadline(time.Now().Add(timeout))
-		data := make([]byte, len(NETCMD_METASERVER_PING))
-		n, err = conn.Read(data)
+		_, err = conn.Read(data)
 		if err != nil || string(data) != NETCMD_METASERVER_PING {
 			pinger.C <- false
 			return
@@ -279,7 +251,30 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		clientForgetTimeout:  time.Minute * 5,
 	}
 	server.gamePingCreator = RealGamePingFactory{server}
-
 	go server.mainLoop()
 	return server
+}
+
+func (s *Server) mainLoop() error {
+	for done := false; !done; {
+		select {
+		case conn, ok := <-s.acceptedConnections:
+			if !ok {
+				done = true
+			} else {
+				// The client will register itself if it feels the need.
+				go DealWithNewConnection(conn, s)
+			}
+		case <-s.shutdownServer:
+			for s.clients.Len() > 0 {
+				e := s.clients.Front()
+				e.Value.(*Client).Disconnect()
+				s.clients.Remove(e)
+			}
+			close(s.acceptedConnections)
+			s.serverHasShutdown <- true
+			done = true
+		}
+	}
+	return nil
 }

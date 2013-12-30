@@ -17,21 +17,21 @@ type UserDb interface {
 	Close()
 }
 
-type User struct {
+type user struct {
 	password    string
 	permissions Permissions
 }
 
 type InMemoryUserDb struct {
-	users map[string]User
+	users map[string]user
 }
 
 func NewInMemoryDb() *InMemoryUserDb {
-	return &InMemoryUserDb{make(map[string]User)}
+	return &InMemoryUserDb{make(map[string]user)}
 }
 
 func (i *InMemoryUserDb) AddUser(name string, password string, perms Permissions) {
-	i.users[name] = User{password, perms}
+	i.users[name] = user{password, perms}
 }
 
 func (i InMemoryUserDb) ContainsName(name string) bool {
@@ -66,9 +66,7 @@ func NewMySqlDatabase(database, user, password, table string) *SqlDatabase {
 	if err != nil {
 		log.Fatal("Could not connect to database.")
 	}
-	return &SqlDatabase{
-		con,
-	}
+	return &SqlDatabase{con}
 }
 
 func (db *SqlDatabase) Close() {
@@ -77,6 +75,7 @@ func (db *SqlDatabase) Close() {
 		db.db = nil
 	}
 }
+
 func (db *SqlDatabase) ContainsName(name string) bool {
 	var id int
 	err := db.db.QueryRow("select id from auth_user where username=?", name).Scan(&id)
@@ -117,6 +116,7 @@ func (db *SqlDatabase) Permissions(name string) Permissions {
 		return UNREGISTERED
 	}
 
+	// Historic values from ggz.
 	switch permission {
 	case 127:
 		return SUPERUSER

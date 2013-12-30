@@ -12,9 +12,9 @@ type Packet struct {
 	RawData []string
 }
 
-func New(RawData ...interface{}) []byte {
+func New(rawData ...interface{}) []byte {
 	nbytes := 2
-	for _, v := range RawData {
+	for _, v := range rawData {
 		switch v.(type) {
 		case int:
 			nbytes += len(strconv.Itoa(v.(int))) + 1
@@ -32,11 +32,14 @@ func New(RawData ...interface{}) []byte {
 	}
 
 	buf := make([]byte, nbytes)
+
+	// Length of package.
 	buf[0] = byte((nbytes & 0xff00) >> 8)
 	buf[1] = byte(nbytes & 0xff)
+
 	i := 2
-	for _, v := range RawData {
-		as_string := ""
+	for _, v := range rawData {
+		var as_string string
 		switch v.(type) {
 		case int:
 			as_string = strconv.Itoa(v.(int))
