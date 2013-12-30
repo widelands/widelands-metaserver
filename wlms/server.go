@@ -95,7 +95,7 @@ func (s *Server) RemoveClient(client *Client) {
 		if e.Value.(*Client) == client {
 			s.clients.Remove(e)
 			log.Printf("Removing client %s.", client.Name())
-			// NOCOM(sirver): this should not broadcast here.
+			// NOCOM(#sirver): this should not broadcast here.
 			s.BroadcastToConnectedClients("CLIENTS_UPDATE")
 		}
 	}
@@ -133,7 +133,7 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 
 func (s *Server) AddGame(game *Game) {
 	s.games.PushBack(game)
-	// NOCOM(sirver): do not broadcast implicitly
+	// NOCOM(#sirver): do not broadcast implicitly
 	s.BroadcastToConnectedClients("GAMES_UPDATE")
 }
 
@@ -142,7 +142,7 @@ func (s *Server) RemoveGame(game *Game) {
 		if e.Value.(*Game) == game {
 			log.Printf("Removing game %s.", game.Name())
 			s.games.Remove(e)
-			// NOCOM(sirver): consider if you want to broadcast here
+			// NOCOM(#sirver): consider if you want to broadcast here
 			s.BroadcastToConnectedClients("GAMES_UPDATE")
 		}
 	}

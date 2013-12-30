@@ -1,6 +1,7 @@
 package main
 
-// NOCOM(sirver): more state logging. I.e. opening a game and disconnect somehow and game pinging.
+// NOCOM(#sirver): more state logging. I.e. opening a game and disconnect somehow and game pinging.
+// NOCOM(#sirver): refactor this file
 
 import (
 	"fmt"
@@ -402,14 +403,14 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) (string
 		return "WRONG_INFORMATION", true
 	}
 
-	// NOCOM(sirver): we must delete the new client and keep the old one as we passed the pointer around.
+	// NOCOM(#sirver): we must delete the new client and keep the old one as we passed the pointer around.
 	client.protocolVersion = oldClient.protocolVersion
 	client.buildId = oldClient.buildId
 	client.userName = oldClient.userName
 	client.loginTime = oldClient.loginTime
 	client.game = oldClient.game
 	if oldClient.state == RECENTLY_DISCONNECTED {
-		// NOCOM(sirver): this needs to be factored out
+		// NOCOM(#sirver): this needs to be factored out
 		client.SendPacket("RELOGIN")
 		client.state = CONNECTED
 		server.AddClient(client)
@@ -492,7 +493,7 @@ func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) (str
 	return "", false
 }
 
-// NOCOM(sirver): must only have one client for each user.
+// NOCOM(#sirver): must only have one client for each user.
 func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
 	if client.game == nil {
 		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
@@ -510,7 +511,6 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 	if game.Host() == client {
 		log.Print("This ends the game.")
 		server.RemoveGame(game)
-		server.BroadcastToConnectedClients("GAMES_UPDATE")
 	}
 	game.RemoveClient(client)
 
