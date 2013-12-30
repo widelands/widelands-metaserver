@@ -136,7 +136,6 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 
 	defer func() {
 		time.AfterFunc(server.ClientForgetTimeout(), func() {
-			client.Disconnect(*server)
 			server.RemoveClient(client)
 		})
 	}()
@@ -247,12 +246,11 @@ func (client Client) remoteIp() string {
 }
 
 func (newClient *Client) successfulRelogin(server *Server, oldClient *Client) {
-	newClient.SendPacket("RELOGIN")
-	// Replace the client.
-	newClient.state = CONNECTED
-	server.AddClient(newClient)
-	oldClient.Disconnect(*server)
 	server.RemoveClient(oldClient)
+
+	newClient.SendPacket("RELOGIN")
+	server.AddClient(newClient)
+	newClient.setState(CONNECTED, *server)
 }
 
 func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {

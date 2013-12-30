@@ -93,10 +93,8 @@ func (s *Server) AddClient(client *Client) {
 func (s *Server) RemoveClient(client *Client) {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client) == client {
-			s.clients.Remove(e)
 			log.Printf("Removing client %s.", client.Name())
-			// NOCOM(#sirver): this should not broadcast here.
-			s.BroadcastToConnectedClients("CLIENTS_UPDATE")
+			s.clients.Remove(e)
 		}
 	}
 }
