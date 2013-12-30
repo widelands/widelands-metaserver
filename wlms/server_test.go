@@ -11,13 +11,7 @@ import (
 // Hook up gocheck into the gotest runner.
 func Test(t *testing.T) { TestingT(t) }
 
-type EndToEndSuite struct{}
-
-var _ = Suite(&EndToEndSuite{})
-
-type Matching string
-
-func writeDataToConnection(conn FakeConn, data ...string) {
+func WriteDataToConnection(conn FakeConn, data ...string) {
 	go func() {
 		for _, d := range data {
 			conn.Write([]byte(d))
@@ -48,6 +42,8 @@ func SetupServer(c *C, nClients int) (*Server, []FakeConn) {
 	}
 	return CreateServerUsing(acceptingConnections, db), cons
 }
+
+type Matching string
 
 func ExpectPacket(c *C, f FakeConn, expected ...interface{}) {
 	timer := time.NewTimer(20 * time.Millisecond)
@@ -80,12 +76,14 @@ func ExpectLoginAsUnregisteredWorks(c *C, f FakeConn, name string) {
 	ExpectPacket(c, f, "TIME", Matching("\\d+"))
 	ExpectPacket(c, f, "CLIENTS_UPDATE")
 }
-func ExpectLoginForOttoWorks(c *C, f FakeConn) {
+
+func ExpectLoginAsOttoWorks(c *C, f FakeConn) {
 	SendPacket(f, "LOGIN", 0, "otto", "build-17", true, "ottoiscool")
 	ExpectPacket(c, f, "LOGIN", "otto", "REGISTERED")
 	ExpectPacket(c, f, "TIME", Matching("\\d+"))
 	ExpectPacket(c, f, "CLIENTS_UPDATE")
 }
+
 func ExpectLoginAsSirVerWorks(c *C, f FakeConn) {
 	SendPacket(f, "LOGIN", 0, "SirVer", "build-18", true, "123456")
 	ExpectPacket(c, f, "LOGIN", "SirVer", "SUPERUSER")
@@ -99,35 +97,39 @@ func ExpectServerToShutdownCleanly(c *C, server *Server) {
 	c.Assert(server.NrActiveClients(), Equals, 0)
 }
 
+type EndToEndSuite struct{}
+
+var _ = Suite(&EndToEndSuite{})
+
 // Test Packet decoding {{{
 func (s *EndToEndSuite) TestSimplePacket(c *C) {
 	conn := NewFakeConn(c)
-	writeDataToConnection(conn, "\x00\x07aaaa\x00")
+	WriteDataToConnection(conn, "\x00\x07aaaa\x00")
 	ExpectPacket(c, conn, "aaaa")
 }
 
 func (s *EndToEndSuite) TestSimplePacket1(c *C) {
 	conn := NewFakeConn(c)
-	writeDataToConnection(conn, "\x00\x10aaaa\x00bbb\x00cc\x00d\x00")
+	WriteDataToConnection(conn, "\x00\x10aaaa\x00bbb\x00cc\x00d\x00")
 	ExpectPacket(c, conn, "aaaa", "bbb", "cc", "d")
 }
 
 func (s *EndToEndSuite) TestTwoPacketsInOneRead(c *C) {
 	conn := NewFakeConn(c)
-	writeDataToConnection(conn, "\x00\x07aaaa\x00\x00\x07aaaa\x00")
+	WriteDataToConnection(conn, "\x00\x07aaaa\x00\x00\x07aaaa\x00")
 	ExpectPacket(c, conn, "aaaa")
 	ExpectPacket(c, conn, "aaaa")
 }
 
 func (p *EndToEndSuite) TestFragmentedPackets(c *C) {
 	conn := NewFakeConn(c)
-	writeDataToConnection(conn, "\x00\x0aCLI", "ENTS\x00\x00\x0a", "CLIENTS\x00\x00\x08")
+	WriteDataToConnection(conn, "\x00\x0aCLI", "ENTS\x00\x00\x0a", "CLIENTS\x00\x00\x08")
 	ExpectPacket(c, conn, "CLIENTS")
 	ExpectPacket(c, conn, "CLIENTS")
 }
 
 // }}}
-// Test Login {{{
+// Test Login {{{s
 func (s *EndToEndSuite) TestRegisteredUserIncorrectPassword(c *C) {
 	server, clients := SetupServer(c, 2)
 
@@ -231,6 +233,7 @@ func (s *EndToEndSuite) TestRegisteredUserAlreadyLoggedIn(c *C) {
 }
 
 // }}}
+
 // Test Relogin {{{
 func (e *EndToEndSuite) TestReloginPingAndReply(c *C) {
 	server, clients := SetupServer(c, 2)
@@ -250,7 +253,7 @@ func (e *EndToEndSuite) TestReloginPingAndReply(c *C) {
 
 func (e *EndToEndSuite) TestReloginForNonAnonymous(c *C) {
 	server, clients := SetupServer(c, 2)
-	ExpectLoginForOttoWorks(c, clients[0])
+	ExpectLoginAsOttoWorks(c, clients[0])
 
 	server.SetPingCycleTime(5 * time.Millisecond)
 
@@ -404,7 +407,7 @@ func (e *EndToEndSuite) TestDisconnect(c *C) {
 	server, clients := SetupServer(c, 2)
 
 	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
-	ExpectLoginForOttoWorks(c, clients[1])
+	ExpectLoginAsOttoWorks(c, clients[1])
 
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 	SendPacket(clients[0], "DISCONNECT", "Gotta fly now!")
@@ -527,7 +530,7 @@ func (s *EndToEndSuite) TestMotd(c *C) {
 	server, clients := SetupServer(c, 3)
 
 	ExpectLoginAsSirVerWorks(c, clients[0])
-	ExpectLoginForOttoWorks(c, clients[1])
+	ExpectLoginAsOttoWorks(c, clients[1])
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 
 	// Check Superuser setting motd.
@@ -556,7 +559,7 @@ func (s *EndToEndSuite) TestAnnouncement(c *C) {
 	server, clients := SetupServer(c, 3)
 
 	ExpectLoginAsSirVerWorks(c, clients[0])
-	ExpectLoginForOttoWorks(c, clients[1])
+	ExpectLoginAsOttoWorks(c, clients[1])
 	ExpectLoginAsUnregisteredWorks(c, clients[2], "bert")
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
@@ -596,7 +599,7 @@ func gameTestSetup(c *C, loginThirdConnection bool) (*Server, []FakeConn, GamePi
 	server.SetGamePingTimeout(5 * time.Millisecond)
 
 	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
-	ExpectLoginForOttoWorks(c, clients[1])
+	ExpectLoginAsOttoWorks(c, clients[1])
 
 	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 
@@ -871,6 +874,7 @@ func gameLeavingSetup(c *C, loginThirdConnection bool) (*Server, []FakeConn) {
 
 	return server, clients
 }
+
 func (s *EndToEndSuite) TestGameNonHostLeaving(c *C) {
 	server, clients := gameLeavingSetup(c, true)
 
