@@ -74,6 +74,26 @@ func Read(r io.Reader) (*Packet, error) {
 	return &Packet{returnValue[:len(returnValue)-1]}, nil
 }
 
+func (p *Packet) Unpack(returnValues ...interface{}) error {
+	for _, ptr := range returnValues {
+		var err error
+		switch ptr := ptr.(type) {
+		case *int:
+			*ptr, err = p.ReadInt()
+		case *bool:
+			*ptr, err = p.ReadBool()
+		case *string:
+			*ptr, err = p.ReadString()
+		default:
+			log.Fatal("Unknown type in Unpack().")
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *Packet) ReadInt() (int, error) {
 	d, err := p.ReadString()
 	if err != nil {

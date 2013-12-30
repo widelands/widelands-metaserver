@@ -1,8 +1,5 @@
 package main
 
-// NOCOM(#sirver): more state logging. I.e. opening a game and disconnect somehow and game pinging.
-// NOCOM(#sirver): refactor this file
-
 import (
 	"fmt"
 	"launchpad.net/wlmetaserver/wlms/packet"
@@ -51,15 +48,15 @@ type Client struct {
 	// We always read one whole packet and send it over this to the consumer.
 	dataStream chan *packet.Packet
 
+	// the current connection state
+	state State
+
 	// the time when the user logged in for the first time. Relogins do not
 	// update this time.
 	loginTime time.Time
 
 	// the protocol version used for communication
 	protocolVersion int
-
-	// the current connection state
-	state State
 
 	// is this a registered user/super user?
 	permissions Permissions
@@ -84,29 +81,20 @@ func (c Client) State() State {
 	return c.state
 }
 
-func (client *Client) Disconnect() error {
+func (client Client) Name() string {
+	return client.userName
+}
+
+func (client *Client) Disconnect() {
 	client.conn.Close()
 	if client.dataStream != nil {
 		close(client.dataStream)
 		client.dataStream = nil
 	}
-	return nil
 }
 
 func (client *Client) SendPacket(data ...interface{}) {
 	client.conn.Write(packet.New(data...))
-}
-
-func (client Client) Name() string {
-	return client.userName
-}
-
-func (client Client) remoteIp() string {
-	host, _, err := net.SplitHostPort(client.conn.RemoteAddr().String())
-	if err != nil {
-		log.Fatalf("%s is not valid.", client.remoteIp())
-	}
-	return host
 }
 
 func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
@@ -166,11 +154,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 				client.state = RECENTLY_DISCONNECTED
 				client.Disconnect()
 				if client.pendingRelogin != nil {
-					client.pendingRelogin.SendPacket("RELOGIN")
-					client.pendingRelogin.state = CONNECTED
-					// Replace the client.
-					server.AddClient(client.pendingRelogin)
-					server.RemoveClient(client)
+					client.pendingRelogin.successfulRelogin(server, client)
 				} else {
 					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 				}
@@ -219,18 +203,31 @@ func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
 	client.startToPingTimer.Reset(pingCycleTime)
 }
 
-func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) (string, bool) {
-	message, err := pkg.ReadString()
+func (client Client) remoteIp() string {
+	host, _, err := net.SplitHostPort(client.conn.RemoteAddr().String())
 	if err != nil {
+		log.Fatalf("%s is not valid.", client.remoteIp())
+	}
+	return host
+}
+
+func (newClient *Client) successfulRelogin(server *Server, oldClient *Client) {
+	newClient.SendPacket("RELOGIN")
+	// Replace the client.
+	newClient.state = CONNECTED
+	server.AddClient(newClient)
+	oldClient.Disconnect()
+	server.RemoveClient(oldClient)
+}
+
+func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) (string, bool) {
+	var message, receiver string
+	if err := pkg.Unpack(&message, &receiver); err != nil {
 		return err.Error(), false
 	}
 
 	// Sanitize message.
 	message = strings.Replace(message, "<", "&lt;", -1)
-	receiver, err := pkg.ReadString()
-	if err != nil {
-		return err.Error(), false
-	}
 
 	if len(receiver) == 0 {
 		server.BroadcastToConnectedClients("CHAT", client.Name(), message, "public")
@@ -244,8 +241,8 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) (string, b
 }
 
 func (client *Client) Handle_MOTD(server *Server, pkg *packet.Packet) (string, bool) {
-	message, err := pkg.ReadString()
-	if err != nil {
+	var message string
+	if err := pkg.Unpack(&message); err != nil {
 		return err.Error(), false
 	}
 
@@ -259,8 +256,8 @@ func (client *Client) Handle_MOTD(server *Server, pkg *packet.Packet) (string, b
 }
 
 func (client *Client) Handle_ANNOUNCEMENT(server *Server, pkg *packet.Packet) (string, bool) {
-	message, err := pkg.ReadString()
-	if err != nil {
+	var message string
+	if err := pkg.Unpack(&message); err != nil {
 		return err.Error(), false
 	}
 
@@ -273,9 +270,9 @@ func (client *Client) Handle_ANNOUNCEMENT(server *Server, pkg *packet.Packet) (s
 }
 
 func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
-	reason, err := pkg.ReadString()
-	if err != nil {
-		return err.Error(), true
+	var reason string
+	if err := pkg.Unpack(&reason); err != nil {
+		return err.Error(), false
 	}
 	log.Printf("%s left. Reason: '%s'", client.Name(), reason)
 
@@ -288,79 +285,58 @@ func (client *Client) Handle_PONG(server *Server, pkg *packet.Packet) (string, b
 	return "", false
 }
 
-func (client *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) (string, bool) {
-	protocolVersion, err := pkg.ReadInt()
-	if err != nil {
+func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) (string, bool) {
+	var isRegisteredOnServer bool
+	if err := pkg.Unpack(&c.protocolVersion, &c.userName, &c.buildId, &isRegisteredOnServer); err != nil {
 		return err.Error(), true
 	}
-	if protocolVersion != 0 {
+
+	if c.protocolVersion != 0 {
 		return "UNSUPPORTED_PROTOCOL", true
 	}
 
-	userName, err := pkg.ReadString()
-	if err != nil {
-		return err.Error(), true
-	}
-
-	buildId, err := pkg.ReadString()
-	if err != nil {
-		return err.Error(), true
-	}
-
-	isRegisteredOnServer, err := pkg.ReadBool()
-	if err != nil {
-		return err.Error(), true
-	}
-
 	if isRegisteredOnServer {
-		if server.HasClient(userName) != nil {
+		if server.HasClient(c.userName) != nil {
 			return "ALREADY_LOGGED_IN", true
 		}
-		if !server.UserDb().ContainsName(userName) {
+		if !server.UserDb().ContainsName(c.userName) {
 			return "WRONG_PASSWORD", true
 		}
 		password, err := pkg.ReadString()
 		if err != nil {
 			return err.Error(), true
 		}
-		if !server.UserDb().PasswordCorrect(userName, password) {
+		if !server.UserDb().PasswordCorrect(c.userName, password) {
 			return "WRONG_PASSWORD", true
 		}
-		client.permissions = server.UserDb().Permissions(userName)
+		c.permissions = server.UserDb().Permissions(c.userName)
 	} else {
-		baseName := userName
-		for i := 1; server.UserDb().ContainsName(userName) || server.HasClient(userName) != nil; i++ {
-			userName = fmt.Sprintf("%s%d", baseName, i)
+		baseName := c.userName
+		for i := 1; server.UserDb().ContainsName(c.userName) || server.HasClient(c.userName) != nil; i++ {
+			c.userName = fmt.Sprintf("%s%d", baseName, i)
 		}
 	}
 
-	client.protocolVersion = protocolVersion
-	client.buildId = buildId
-	client.userName = userName
-	client.loginTime = time.Now()
-	client.state = CONNECTED
-	log.Printf("%s logged in.", userName)
+	c.loginTime = time.Now()
+	c.state = CONNECTED
+	log.Printf("%s logged in.", c.userName)
 
-	client.SendPacket("LOGIN", userName, client.permissions.String())
-	client.SendPacket("TIME", int(time.Now().Unix()))
-	server.AddClient(client)
+	c.SendPacket("LOGIN", c.userName, c.permissions.String())
+	c.SendPacket("TIME", int(time.Now().Unix()))
+	server.AddClient(c)
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 
 	if len(server.Motd()) != 0 {
-		client.SendPacket("CHAT", "", server.Motd(), "system")
+		c.SendPacket("CHAT", "", server.Motd(), "system")
 	}
-
 	return "", false
 }
 
 func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) (string, bool) {
-	protocolVersion, err := pkg.ReadInt()
-	if err != nil {
-		return err.Error(), true
-	}
-
-	userName, err := pkg.ReadString()
-	if err != nil {
+	var isRegisteredOnServer bool
+	var protocolVersion int
+	var userName, buildId string
+	if err := pkg.Unpack(&protocolVersion, &userName, &buildId, &isRegisteredOnServer); err != nil {
 		return err.Error(), true
 	}
 
@@ -368,24 +344,10 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) (string
 	if oldClient == nil {
 		return "NOT_LOGGED_IN", true
 	}
-	informationMatches := true
 
-	if protocolVersion != client.protocolVersion {
-		informationMatches = false
-	}
-
-	buildId, err := pkg.ReadString()
-	if err != nil {
-		return err.Error(), true
-	}
-	if buildId != oldClient.buildId {
-		informationMatches = false
-	}
-
-	isRegisteredOnServer, err := pkg.ReadBool()
-	if err != nil {
-		return err.Error(), true
-	}
+	informationMatches :=
+		protocolVersion == client.protocolVersion &&
+			buildId == oldClient.buildId
 
 	if isRegisteredOnServer {
 		password, err := pkg.ReadString()
@@ -403,45 +365,34 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) (string
 		return "WRONG_INFORMATION", true
 	}
 
-	// NOCOM(#sirver): we must delete the new client and keep the old one as we passed the pointer around.
-	client.protocolVersion = oldClient.protocolVersion
-	client.buildId = oldClient.buildId
-	client.userName = oldClient.userName
 	client.loginTime = oldClient.loginTime
+	client.protocolVersion = oldClient.protocolVersion
+	client.permissions = oldClient.permissions
+	client.userName = oldClient.userName
+	client.buildId = oldClient.buildId
 	client.game = oldClient.game
 	if oldClient.state == RECENTLY_DISCONNECTED {
-		// NOCOM(#sirver): this needs to be factored out
-		client.SendPacket("RELOGIN")
-		client.state = CONNECTED
-		server.AddClient(client)
-		server.RemoveClient(oldClient)
+		client.successfulRelogin(server, oldClient)
 	} else {
 		client.state = HANDSHAKE
 		oldClient.restartPingLoop(server.PingCycleTime())
 		oldClient.pendingRelogin = client
 	}
-
 	return "", false
 }
 
 func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) (string, bool) {
-	gameName, err := pkg.ReadString()
-	if err != nil {
+	var gameName string
+	var maxPlayer int
+	if err := pkg.Unpack(&gameName, &maxPlayer); err != nil {
 		return err.Error(), false
 	}
-
 	if server.HasGame(gameName) != nil {
 		return "GAME_EXISTS", false
 	}
-
-	maxPlayer, err := pkg.ReadInt()
-	if err != nil {
-		return err.Error(), false
-	}
-	game := NewGame(client, server, gameName, maxPlayer)
-
-	client.game = game
+	client.game = NewGame(client.Name(), server, gameName, maxPlayer)
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+
 	log.Printf("%s hosts %s.", client.userName, gameName)
 
 	return "", false
@@ -457,17 +408,16 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) (s
 	if game == nil {
 		return "NO_SUCH_GAME", false
 	}
-
-	if game.NrClients() == game.MaxClients() {
+	if game.NrPlayers() == game.MaxPlayers() {
 		return "GAME_FULL", false
 	}
 
-	game.AddClient(client)
+	game.AddPlayer(client.Name())
+	host := server.HasClient(game.Host())
+	log.Printf("%s joined %s at IP %s.", client.userName, game.Name(), host.remoteIp())
+	client.SendPacket("GAME_CONNECT", host.remoteIp())
+
 	client.game = game
-
-	log.Printf("%s joined %s at IP %s.", client.userName, game.Name(), game.Host().remoteIp())
-	client.SendPacket("GAME_CONNECT", game.Host().remoteIp())
-
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 
 	return "", false
@@ -476,13 +426,14 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) (s
 func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) (string, bool) {
 	if client.game == nil {
 		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
+		// NOCOM(#sirver): disconnect could call set state?
 		client.Disconnect()
 		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 		client.state = RECENTLY_DISCONNECTED
 		return "", true
 	}
 
-	if client.game.Host() != client {
+	if client.game.Host() != client.Name() {
 		return "DEFICIENT_PERMISSION", false
 	}
 
@@ -493,7 +444,6 @@ func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) (str
 	return "", false
 }
 
-// NOCOM(#sirver): must only have one client for each user.
 func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
 	if client.game == nil {
 		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
@@ -503,16 +453,19 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 		return "", true
 	}
 
+	// NOCOM(#sirver): Add a SetGame(server)
 	game := client.game
+	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+
 	client.game = nil
 
-	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 	log.Printf("%s left the game %s.", client.userName, game.Name())
-	if game.Host() == client {
+	// NOCOM(#sirver): the game could care for this
+	if game.Host() == client.Name() {
 		log.Print("This ends the game.")
 		server.RemoveGame(game)
 	}
-	game.RemoveClient(client)
+	game.RemovePlayer(client.Name())
 
 	return "", false
 }
@@ -549,8 +502,9 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) (string, 
 	data[1] = nrGames
 	n := 2
 	server.ForeachGame(func(game *Game) {
+		host := server.HasClient(game.Host())
 		data[n+0] = game.Name()
-		data[n+1] = game.Host().buildId
+		data[n+1] = host.buildId
 		data[n+2] = game.State() == CONNECTABLE
 		n += 3
 	})

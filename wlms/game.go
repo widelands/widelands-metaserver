@@ -16,9 +16,9 @@ const (
 
 type Game struct {
 	// The first client is always the host.
-	clients    *list.List
+	players    *list.List
 	name       string
-	maxClients int
+	maxPlayers int
 	state      GameState
 }
 
@@ -26,67 +26,52 @@ type GamePinger struct {
 	C chan bool
 }
 
-func (game *Game) pingCycle(host *Client, server *Server) {
+func (game *Game) pingCycle(server *Server) {
 	// Remember to remove the game when we no longer receive pings.
 	defer server.RemoveGame(game)
 
 	for {
-		// This game is not even in our list anymore. Give up.
-		if server.HasGame(game.Name()) != game {
+		// This game is not even in our list anymore. Give up. If the game has no
+		// host anymore or it has disconnected, remove the game.
+		if server.HasGame(game.Name()) != game || game.players.Len() == 0 {
 			return
 		}
-		// If the game has no host anymore or it has disconnected, remove the
-		// game.
-		host := game.Host()
-		if host == nil || server.HasClient(host.Name()) == nil {
+		host := server.HasClient(game.Host())
+		if host == nil {
 			return
 		}
-
 		pinger := server.NewGamePinger(host)
 		success, ok := <-pinger.C
 		if success && ok {
 			log.Printf("Successfull ping reply from game %s.", game.Name())
-			switch game.state {
-			case INITIAL_SETUP:
+			if game.state == INITIAL_SETUP {
 				host.SendPacket("GAME_OPEN")
-				fallthrough
-			case NOT_CONNECTABLE:
-				server.BroadcastToConnectedClients("GAMES_UPDATE")
-			case CONNECTABLE:
-				// do nothing
-			default:
-				log.Fatalf("Unknown game.state: %v", game.state)
 			}
-			game.state = CONNECTABLE
+			game.SetState(*server, CONNECTABLE)
 		} else {
 			log.Printf("Failed ping reply from game %s.", game.Name())
 			switch game.state {
 			case INITIAL_SETUP:
 				host.SendPacket("ERROR", "GAME_OPEN", "GAME_TIMEOUT")
-				server.BroadcastToConnectedClients("GAMES_UPDATE")
 			case CONNECTABLE:
 				return
-			case NOT_CONNECTABLE:
-				// do nothing
-			default:
-				log.Fatalf("Unknown game.state: %v", game.state)
 			}
-			game.state = NOT_CONNECTABLE
+			game.SetState(*server, NOT_CONNECTABLE)
 		}
 		time.Sleep(server.GamePingTimeout())
 	}
 }
 
-func NewGame(host *Client, server *Server, gameName string, maxClients int) *Game {
+func NewGame(hostName string, server *Server, gameName string, maxPlayers int) *Game {
 	game := &Game{
-		clients:    list.New(),
+		players:    list.New(),
 		name:       gameName,
-		maxClients: maxClients,
+		maxPlayers: maxPlayers,
 		state:      INITIAL_SETUP,
 	}
-	game.clients.PushFront(host)
+	game.players.PushFront(hostName)
 	server.AddGame(game)
-	go game.pingCycle(host, server)
+	go game.pingCycle(server)
 	return game
 }
 
@@ -97,30 +82,36 @@ func (g Game) Name() string {
 func (g Game) State() GameState {
 	return g.state
 }
-
-func (g Game) MaxClients() int {
-	return g.maxClients
-}
-
-func (g Game) Host() *Client {
-	if g.clients.Len() == 0 {
-		return nil
+func (g *Game) SetState(server Server, state GameState) {
+	if state != g.state {
+		g.state = state
+		server.BroadcastToConnectedClients("GAMES_UPDATE")
 	}
-	return g.clients.Front().Value.(*Client)
 }
 
-func (g *Game) AddClient(client *Client) {
-	g.clients.PushBack(client)
+func (g Game) MaxPlayers() int {
+	return g.maxPlayers
 }
 
-func (g *Game) RemoveClient(client *Client) {
-	for e := g.clients.Front(); e != nil; e = e.Next() {
-		if e.Value.(*Client) == client {
-			g.clients.Remove(e)
+func (g Game) Host() string {
+	if g.players.Len() == 0 {
+		return ""
+	}
+	return g.players.Front().Value.(string)
+}
+
+func (g *Game) AddPlayer(userName string) {
+	g.players.PushBack(userName)
+}
+
+func (g *Game) RemovePlayer(userName string) {
+	for e := g.players.Front(); e != nil; e = e.Next() {
+		if e.Value.(string) == userName {
+			g.players.Remove(e)
 		}
 	}
 }
 
-func (g Game) NrClients() int {
-	return g.clients.Len()
+func (g Game) NrPlayers() int {
+	return g.players.Len()
 }
