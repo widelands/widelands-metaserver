@@ -1,5 +1,7 @@
 package main
 
+// NOCOM(sirver): more state logging. I.e. opening a game and disconnect somehow and game pinging.
+
 import (
 	"fmt"
 	"launchpad.net/wlmetaserver/wlms/packet"
@@ -77,19 +79,6 @@ type Client struct {
 	pendingRelogin   *Client
 }
 
-func newClient(r ReadWriteCloserWithIp) *Client {
-	client := &Client{
-		conn:             r,
-		dataStream:       make(chan *packet.Packet, 10),
-		state:            HANDSHAKE,
-		permissions:      UNREGISTERED,
-		startToPingTimer: time.NewTimer(time.Hour * 1),
-		timeoutTimer:     time.NewTimer(time.Hour * 1),
-	}
-	go client.readingLoop()
-	return client
-}
-
 func (c Client) State() State {
 	return c.state
 }
@@ -109,10 +98,6 @@ func (client *Client) SendPacket(data ...interface{}) {
 
 func (client Client) Name() string {
 	return client.userName
-}
-
-func (client *Client) SetGame(game *Game) {
-	client.game = game
 }
 
 func (client Client) remoteIp() string {
@@ -154,7 +139,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 				break
 			}
 
-			handlerFunc := reflect.ValueOf(client).MethodByName(strings.Join([]string{"Handle", cmdName}, ""))
+			handlerFunc := reflect.ValueOf(client).MethodByName(strings.Join([]string{"Handle_", cmdName}, ""))
 			if handlerFunc.IsValid() {
 				handlerFunc := handlerFunc.Interface().(func(*Server, *packet.Packet) (string, bool))
 				errString := ""
@@ -201,6 +186,19 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	})
 }
 
+func newClient(r ReadWriteCloserWithIp) *Client {
+	client := &Client{
+		conn:             r,
+		dataStream:       make(chan *packet.Packet, 10),
+		state:            HANDSHAKE,
+		permissions:      UNREGISTERED,
+		startToPingTimer: time.NewTimer(time.Hour * 1),
+		timeoutTimer:     time.NewTimer(time.Hour * 1),
+	}
+	go client.readingLoop()
+	return client
+}
+
 func (client *Client) readingLoop() {
 	for {
 		pkg, err := packet.Read(client.conn)
@@ -220,7 +218,7 @@ func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
 	client.startToPingTimer.Reset(pingCycleTime)
 }
 
-func (client *Client) HandleCHAT(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) (string, bool) {
 	message, err := pkg.ReadString()
 	if err != nil {
 		return err.Error(), false
@@ -244,7 +242,7 @@ func (client *Client) HandleCHAT(server *Server, pkg *packet.Packet) (string, bo
 	return "", false
 }
 
-func (client *Client) HandleMOTD(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_MOTD(server *Server, pkg *packet.Packet) (string, bool) {
 	message, err := pkg.ReadString()
 	if err != nil {
 		return err.Error(), false
@@ -259,7 +257,7 @@ func (client *Client) HandleMOTD(server *Server, pkg *packet.Packet) (string, bo
 	return "", false
 }
 
-func (client *Client) HandleANNOUNCEMENT(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_ANNOUNCEMENT(server *Server, pkg *packet.Packet) (string, bool) {
 	message, err := pkg.ReadString()
 	if err != nil {
 		return err.Error(), false
@@ -273,7 +271,7 @@ func (client *Client) HandleANNOUNCEMENT(server *Server, pkg *packet.Packet) (st
 	return "", false
 }
 
-func (client *Client) HandleDISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
 	reason, err := pkg.ReadString()
 	if err != nil {
 		return err.Error(), true
@@ -285,11 +283,11 @@ func (client *Client) HandleDISCONNECT(server *Server, pkg *packet.Packet) (stri
 	return "", true
 }
 
-func (client *Client) HandlePONG(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_PONG(server *Server, pkg *packet.Packet) (string, bool) {
 	return "", false
 }
 
-func (client *Client) HandleLOGIN(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) (string, bool) {
 	protocolVersion, err := pkg.ReadInt()
 	if err != nil {
 		return err.Error(), true
@@ -354,7 +352,7 @@ func (client *Client) HandleLOGIN(server *Server, pkg *packet.Packet) (string, b
 	return "", false
 }
 
-func (client *Client) HandleRELOGIN(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) (string, bool) {
 	protocolVersion, err := pkg.ReadInt()
 	if err != nil {
 		return err.Error(), true
@@ -404,12 +402,14 @@ func (client *Client) HandleRELOGIN(server *Server, pkg *packet.Packet) (string,
 		return "WRONG_INFORMATION", true
 	}
 
+	// NOCOM(sirver): we must delete the new client and keep the old one as we passed the pointer around.
 	client.protocolVersion = oldClient.protocolVersion
 	client.buildId = oldClient.buildId
 	client.userName = oldClient.userName
 	client.loginTime = oldClient.loginTime
 	client.game = oldClient.game
 	if oldClient.state == RECENTLY_DISCONNECTED {
+		// NOCOM(sirver): this needs to be factored out
 		client.SendPacket("RELOGIN")
 		client.state = CONNECTED
 		server.AddClient(client)
@@ -423,7 +423,7 @@ func (client *Client) HandleRELOGIN(server *Server, pkg *packet.Packet) (string,
 	return "", false
 }
 
-func (client *Client) HandleGAME_OPEN(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) (string, bool) {
 	gameName, err := pkg.ReadString()
 	if err != nil {
 		return err.Error(), false
@@ -441,11 +441,12 @@ func (client *Client) HandleGAME_OPEN(server *Server, pkg *packet.Packet) (strin
 
 	client.game = game
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+	log.Printf("%s hosts %s.", client.userName, gameName)
 
 	return "", false
 }
 
-func (client *Client) HandleGAME_CONNECT(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) (string, bool) {
 	gameName, err := pkg.ReadString()
 	if err != nil {
 		return err.Error(), false
@@ -463,7 +464,7 @@ func (client *Client) HandleGAME_CONNECT(server *Server, pkg *packet.Packet) (st
 	game.AddClient(client)
 	client.game = game
 
-	log.Printf("%s joined %s at IP %s.", client.userName, game.name, game.Host().remoteIp())
+	log.Printf("%s joined %s at IP %s.", client.userName, game.Name(), game.Host().remoteIp())
 	client.SendPacket("GAME_CONNECT", game.Host().remoteIp())
 
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
@@ -471,7 +472,7 @@ func (client *Client) HandleGAME_CONNECT(server *Server, pkg *packet.Packet) (st
 	return "", false
 }
 
-func (client *Client) HandleGAME_START(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) (string, bool) {
 	if client.game == nil {
 		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 		client.Disconnect()
@@ -485,15 +486,14 @@ func (client *Client) HandleGAME_START(server *Server, pkg *packet.Packet) (stri
 	}
 
 	client.SendPacket("GAME_START")
-
 	server.BroadcastToConnectedClients("GAMES_UPDATE")
+	log.Printf("%s has started.", client.game.Name())
 
 	return "", false
 }
 
 // NOCOM(sirver): must only have one client for each user.
-// NOCOM(sirver): add in a _
-func (client *Client) HandleGAME_DISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet) (string, bool) {
 	if client.game == nil {
 		client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 		client.Disconnect()
@@ -506,7 +506,9 @@ func (client *Client) HandleGAME_DISCONNECT(server *Server, pkg *packet.Packet) 
 	client.game = nil
 
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+	log.Printf("%s left the game %s.", client.userName, game.Name())
 	if game.Host() == client {
+		log.Print("This ends the game.")
 		server.RemoveGame(game)
 		server.BroadcastToConnectedClients("GAMES_UPDATE")
 	}
@@ -515,7 +517,7 @@ func (client *Client) HandleGAME_DISCONNECT(server *Server, pkg *packet.Packet) 
 	return "", false
 }
 
-func (client *Client) HandleCLIENTS(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) (string, bool) {
 	nrClients := server.NrActiveClients()
 	data := make([]interface{}, 2+nrClients*5)
 
@@ -539,7 +541,7 @@ func (client *Client) HandleCLIENTS(server *Server, pkg *packet.Packet) (string,
 	return "", false
 }
 
-func (client *Client) HandleGAMES(server *Server, pkg *packet.Packet) (string, bool) {
+func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) (string, bool) {
 	nrGames := server.NrGames()
 	data := make([]interface{}, 2+nrGames*3)
 

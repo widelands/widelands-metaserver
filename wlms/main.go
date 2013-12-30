@@ -7,11 +7,11 @@ import (
 	"log"
 )
 
-type JsonCfg struct {
+type Config struct {
 	Database, User, Password, Table string
 }
 
-func (l *JsonCfg) ConfigFrom(path string) error {
+func (l *Config) ConfigFrom(path string) error {
 	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		return err
@@ -26,7 +26,7 @@ func main() {
 
 	var db UserDb
 	if config != "" {
-		var cfg JsonCfg
+		var cfg Config
 		if err := cfg.ConfigFrom(config); err != nil {
 			log.Fatalf("Could not parse config file: %v", err)
 		}

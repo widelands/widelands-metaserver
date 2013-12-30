@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const NETCMD_METASERVER_PING = "\x00\x03@"
+
 type ReadWriteCloserWithIp interface {
 	io.ReadWriteCloser
 	RemoteAddr() net.Addr
@@ -80,7 +82,6 @@ func (s *Server) WaitTillShutdown() {
 	<-s.serverHasShutdown
 }
 
-// NOCOM(sirver): this is only good for testing.
 func (s *Server) NewGamePinger(client *Client) *GamePinger {
 	return s.gamePingCreator.New(client, s.gamePingTimeout)
 }
@@ -117,6 +118,7 @@ func (s *Server) RemoveClient(client *Client) {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client) == client {
 			s.clients.Remove(e)
+			log.Printf("Removing client %s.", client.Name())
 			s.BroadcastToConnectedClients("CLIENTS_UPDATE")
 		}
 	}
@@ -161,6 +163,7 @@ func (s *Server) AddGame(game *Game) {
 func (s *Server) RemoveGame(game *Game) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Game) == game {
+			log.Printf("Removing game %s.", game.Name())
 			s.games.Remove(e)
 			s.BroadcastToConnectedClients("GAMES_UPDATE")
 		}

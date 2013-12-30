@@ -2,16 +2,15 @@ package main
 
 import (
 	"container/list"
+	"log"
 	"time"
 )
-
-const NETCMD_METASERVER_PING = "\x00\x03@"
 
 type GameState int
 
 const (
-	INITIAL_SETUP   GameState = iota
-	NOT_CONNECTABLE GameState = iota
+	INITIAL_SETUP GameState = iota
+	NOT_CONNECTABLE
 	CONNECTABLE
 )
 
@@ -28,26 +27,51 @@ type GamePinger struct {
 }
 
 func (game *Game) pingCycle(host *Client, server *Server) {
-	for server.HasGame(game.Name()) == game {
-		pinger := server.NewGamePinger(host)
+	// Remember to remove the game when we no longer receive pings.
+	defer server.RemoveGame(game)
 
+	for {
+		// This game is not even in our list anymore. Give up.
+		if server.HasGame(game.Name()) != game {
+			return
+		}
+		// If the game has no host anymore or it has disconnected, remove the
+		// game.
+		host := game.Host()
+		if host == nil || server.HasClient(host.Name()) == nil {
+			return
+		}
+
+		pinger := server.NewGamePinger(host)
 		success, ok := <-pinger.C
 		if success && ok {
-			if game.state != CONNECTABLE {
-				if game.state == INITIAL_SETUP {
-					game.Host().SendPacket("GAME_OPEN")
-				}
+			log.Printf("Successfull ping reply from game %s.", game.Name())
+			switch game.state {
+			case INITIAL_SETUP:
+				host.SendPacket("GAME_OPEN")
+				fallthrough
+			case NOT_CONNECTABLE:
 				server.BroadcastToConnectedClients("GAMES_UPDATE")
+			case CONNECTABLE:
+				// do nothing
+			default:
+				log.Fatalf("Unknown game.state: %v", game.state)
 			}
 			game.state = CONNECTABLE
 		} else {
-			if game.state == INITIAL_SETUP {
-				game.state = NOT_CONNECTABLE
-				game.Host().SendPacket("ERROR", "GAME_OPEN", "GAME_TIMEOUT")
+			log.Printf("Failed ping reply from game %s.", game.Name())
+			switch game.state {
+			case INITIAL_SETUP:
+				host.SendPacket("ERROR", "GAME_OPEN", "GAME_TIMEOUT")
 				server.BroadcastToConnectedClients("GAMES_UPDATE")
-			} else if game.state != NOT_CONNECTABLE {
-				server.RemoveGame(game)
+			case CONNECTABLE:
+				return
+			case NOT_CONNECTABLE:
+				// do nothing
+			default:
+				log.Fatalf("Unknown game.state: %v", game.state)
 			}
+			game.state = NOT_CONNECTABLE
 		}
 		time.Sleep(server.GamePingTimeout())
 	}
@@ -79,6 +103,9 @@ func (g Game) MaxClients() int {
 }
 
 func (g Game) Host() *Client {
+	if g.clients.Len() == 0 {
+		return nil
+	}
 	return g.clients.Front().Value.(*Client)
 }
 
