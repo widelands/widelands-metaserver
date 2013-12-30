@@ -912,6 +912,7 @@ func (s *EndToEndSuite) TestGameLeavingNotInGame(c *C) {
 	SendPacket(clients[2], "GAME_DISCONNECT")
 	ExpectPacket(c, clients[2], "ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 	ExpectClosed(c, clients[2])
+
 	clients = clients[:2]
 	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
 

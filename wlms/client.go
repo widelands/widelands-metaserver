@@ -90,18 +90,40 @@ type InvalidPacketError struct{}
 func (c Client) State() State {
 	return c.state
 }
+func (c *Client) setState(s State, server Server) {
+	need_broadcast := false
+	switch s {
+	case HANDSHAKE, RECENTLY_DISCONNECTED:
+		need_broadcast = c.state == CONNECTED
+	case CONNECTED:
+		need_broadcast = c.state == HANDSHAKE || c.state == RECENTLY_DISCONNECTED
+	default:
+		log.Fatal("Unkown state in setState.")
+	}
+	c.state = s
+	if need_broadcast {
+		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+	}
+}
 
 func (client Client) Name() string {
 	return client.userName
 }
 
-func (client *Client) Disconnect() {
+func (client *Client) setGame(game *Game, server Server) {
+	if client.game != game {
+		client.game = game
+		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+	}
+}
+
+func (client *Client) Disconnect(server Server) {
 	client.conn.Close()
 	if client.dataStream != nil {
 		close(client.dataStream)
 		client.dataStream = nil
 	}
-	client.state = RECENTLY_DISCONNECTED
+	client.setState(RECENTLY_DISCONNECTED, server)
 }
 
 func (client *Client) SendPacket(data ...interface{}) {
@@ -110,8 +132,11 @@ func (client *Client) SendPacket(data ...interface{}) {
 
 func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	client := newClient(conn)
+	go client.readingLoop(*server)
+
 	defer func() {
 		time.AfterFunc(server.ClientForgetTimeout(), func() {
+			client.Disconnect(*server)
 			server.RemoveClient(client)
 		})
 	}()
@@ -124,8 +149,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 		select {
 		case pkg, ok := <-client.dataStream:
 			if !ok {
-				client.Disconnect()
-				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+				client.Disconnect(*server)
 				break
 			}
 			client.waitingForPong = false
@@ -134,14 +158,13 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 
 			if client.pendingRelogin != nil {
 				client.pendingRelogin.SendPacket("ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
-				client.pendingRelogin.Disconnect()
+				client.pendingRelogin.Disconnect(*server)
 				client.pendingRelogin = nil
 			}
 
 			cmdName, err := pkg.ReadString()
 			if err != nil {
-				client.Disconnect()
-				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+				client.pendingRelogin.Disconnect(*server)
 				break
 			}
 
@@ -157,12 +180,10 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 					client.SendPacket("ERROR", cmdName, pkgErr.What)
 				case CriticalCmdPacketError:
 					client.SendPacket("ERROR", cmdName, pkgErr.What)
-					client.Disconnect()
-					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+					client.Disconnect(*server)
 				case InvalidPacketError:
 					client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
-					client.Disconnect()
-					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+					client.Disconnect(*server)
 				default:
 					log.Fatal("Unknown error type returned by handler function.")
 				}
@@ -170,18 +191,16 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 
 		case <-client.timeoutTimer.C:
 			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
-			client.Disconnect()
-			server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+			client.Disconnect(*server)
+
 		case <-client.startToPingTimer.C:
 			if !client.waitingForPong {
 				client.restartPingLoop(server.PingCycleTime())
 			} else {
 				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
-				client.Disconnect()
+				client.Disconnect(*server)
 				if client.pendingRelogin != nil {
 					client.pendingRelogin.successfulRelogin(server, client)
-				} else {
-					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 				}
 			}
 		}
@@ -197,11 +216,10 @@ func newClient(r ReadWriteCloserWithIp) *Client {
 		startToPingTimer: time.NewTimer(time.Hour * 1),
 		timeoutTimer:     time.NewTimer(time.Hour * 1),
 	}
-	go client.readingLoop()
 	return client
 }
 
-func (client *Client) readingLoop() {
+func (client *Client) readingLoop(server Server) {
 	for {
 		pkg, err := packet.Read(client.conn)
 		if err != nil {
@@ -209,7 +227,7 @@ func (client *Client) readingLoop() {
 		}
 		client.dataStream <- pkg
 	}
-	client.Disconnect()
+	client.Disconnect(server)
 }
 
 func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
@@ -233,7 +251,7 @@ func (newClient *Client) successfulRelogin(server *Server, oldClient *Client) {
 	// Replace the client.
 	newClient.state = CONNECTED
 	server.AddClient(newClient)
-	oldClient.Disconnect()
+	oldClient.Disconnect(*server)
 	server.RemoveClient(oldClient)
 }
 
@@ -291,8 +309,8 @@ func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) CmdE
 	}
 	log.Printf("%s left. Reason: '%s'", client.Name(), reason)
 
+	client.Disconnect(*server)
 	server.RemoveClient(client)
-	client.Disconnect()
 	return nil
 }
 
@@ -333,13 +351,12 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 	}
 
 	c.loginTime = time.Now()
-	c.state = CONNECTED
 	log.Printf("%s logged in.", c.userName)
 
 	c.SendPacket("LOGIN", c.userName, c.permissions.String())
 	c.SendPacket("TIME", int(time.Now().Unix()))
 	server.AddClient(c)
-	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+	c.setState(CONNECTED, *server)
 
 	if len(server.Motd()) != 0 {
 		c.SendPacket("CHAT", "", server.Motd(), "system")
@@ -405,8 +422,8 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 	if server.HasGame(gameName) != nil {
 		return CmdPacketError{"GAME_EXISTS"}
 	}
-	client.game = NewGame(client.Name(), server, gameName, maxPlayer)
-	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+
+	client.setGame(NewGame(client.Name(), server, gameName, maxPlayer), *server)
 
 	log.Printf("%s hosts %s.", client.userName, gameName)
 	return nil
@@ -429,10 +446,10 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 	game.AddPlayer(client.Name())
 	host := server.HasClient(game.Host())
 	log.Printf("%s joined %s at IP %s.", client.userName, game.Name(), host.remoteIp())
-	client.SendPacket("GAME_CONNECT", host.remoteIp())
 
-	client.game = game
-	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+	client.SendPacket("GAME_CONNECT", host.remoteIp())
+	client.setGame(game, *server)
+
 	return nil
 }
 
@@ -447,6 +464,7 @@ func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) CmdE
 
 	client.SendPacket("GAME_START")
 	server.BroadcastToConnectedClients("GAMES_UPDATE")
+
 	log.Printf("%s has started.", client.game.Name())
 	return nil
 }
@@ -456,11 +474,8 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 		return InvalidPacketError{}
 	}
 
-	// NOCOM(#sirver): Add a SetGame(server)
 	game := client.game
-	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
-
-	client.game = nil
+	client.setGame(nil, *server)
 
 	log.Printf("%s left the game %s.", client.userName, game.Name())
 	if game.Host() == client.Name() {

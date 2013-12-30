@@ -265,7 +265,7 @@ func (s *Server) mainLoop() {
 		case <-s.shutdownServer:
 			for s.clients.Len() > 0 {
 				e := s.clients.Front()
-				e.Value.(*Client).Disconnect()
+				e.Value.(*Client).Disconnect(*s)
 				s.clients.Remove(e)
 			}
 			close(s.acceptedConnections)
