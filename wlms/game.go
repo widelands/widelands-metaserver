@@ -70,7 +70,9 @@ func NewGame(hostName string, server *Server, gameName string, maxPlayers int) *
 		state:      INITIAL_SETUP,
 	}
 	game.players.PushFront(hostName)
+
 	server.AddGame(game)
+
 	go game.pingCycle(server)
 	return game
 }

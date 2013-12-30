@@ -133,7 +133,6 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 
 func (s *Server) AddGame(game *Game) {
 	s.games.PushBack(game)
-	// NOCOM(#sirver): do not broadcast implicitly
 	s.BroadcastToConnectedClients("GAMES_UPDATE")
 }
 
@@ -142,7 +141,6 @@ func (s *Server) RemoveGame(game *Game) {
 		if e.Value.(*Game) == game {
 			log.Printf("Removing game %s.", game.Name())
 			s.games.Remove(e)
-			// NOCOM(#sirver): consider if you want to broadcast here
 			s.BroadcastToConnectedClients("GAMES_UPDATE")
 		}
 	}
@@ -255,16 +253,15 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 	return server
 }
 
-func (s *Server) mainLoop() error {
-	for done := false; !done; {
+func (s *Server) mainLoop() {
+	for {
 		select {
 		case conn, ok := <-s.acceptedConnections:
 			if !ok {
-				done = true
-			} else {
-				// The client will register itself if it feels the need.
-				go DealWithNewConnection(conn, s)
+				return
 			}
+			// The client will register itself if it feels the need.
+			go DealWithNewConnection(conn, s)
 		case <-s.shutdownServer:
 			for s.clients.Len() > 0 {
 				e := s.clients.Front()
@@ -273,8 +270,7 @@ func (s *Server) mainLoop() error {
 			}
 			close(s.acceptedConnections)
 			s.serverHasShutdown <- true
-			done = true
+			return
 		}
 	}
-	return nil
 }

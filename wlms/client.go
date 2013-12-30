@@ -100,55 +100,65 @@ func (client *Client) SendPacket(data ...interface{}) {
 
 func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	client := newClient(conn)
+	defer func() {
+		time.AfterFunc(server.ClientForgetTimeout(), func() {
+			server.RemoveClient(client)
+		})
+	}()
+
 	client.startToPingTimer.Reset(server.PingCycleTime())
 	client.timeoutTimer.Reset(server.ClientSendingTimeout())
 	client.waitingForPong = false
 
-	for done := false; !done; {
+	for {
 		select {
 		case pkg, ok := <-client.dataStream:
 			if !ok {
 				client.Disconnect()
 				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
-				done = true
 				break
 			}
 			client.waitingForPong = false
+			client.startToPingTimer.Reset(server.PingCycleTime())
+			client.timeoutTimer.Reset(server.ClientSendingTimeout())
+
 			if client.pendingRelogin != nil {
 				client.pendingRelogin.SendPacket("ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
 				client.pendingRelogin.Disconnect()
 				client.pendingRelogin = nil
 			}
-			client.startToPingTimer.Reset(server.PingCycleTime())
-			client.timeoutTimer.Reset(server.ClientSendingTimeout())
 
 			cmdName, err := pkg.ReadString()
 			if err != nil {
-				done = true
+				client.Disconnect()
+				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 				break
 			}
 
 			handlerFunc := reflect.ValueOf(client).MethodByName(strings.Join([]string{"Handle_", cmdName}, ""))
 			if handlerFunc.IsValid() {
 				handlerFunc := handlerFunc.Interface().(func(*Server, *packet.Packet) (string, bool))
-				errString := ""
-				errString, done = handlerFunc(server, pkg)
+				errString, done := handlerFunc(server, pkg)
 				if errString != "" {
 					client.SendPacket("ERROR", cmdName, errString)
+				}
+				// NOCOM(#sirver): kill done
+				if done {
+					client.Disconnect()
 				}
 			} else {
 				client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 				client.Disconnect()
 				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
-				done = true
 			}
 		case <-client.timeoutTimer.C:
 			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 			client.Disconnect()
 			server.BroadcastToConnectedClients("CLIENTS_UPDATE")
-			done = true
 		case <-client.startToPingTimer.C:
-			if client.waitingForPong {
+			if !client.waitingForPong {
+				client.restartPingLoop(server.PingCycleTime())
+			} else {
 				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 				client.Disconnect()
 				if client.pendingRelogin != nil {
@@ -156,17 +166,9 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 				} else {
 					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 				}
-				done = true
-				break
 			}
-			client.restartPingLoop(server.PingCycleTime())
 		}
 	}
-	client.Disconnect()
-
-	time.AfterFunc(server.ClientForgetTimeout(), func() {
-		server.RemoveClient(client)
-	})
 }
 
 func newClient(r ReadWriteCloserWithIp) *Client {
@@ -456,7 +458,6 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 	client.game = nil
 
 	log.Printf("%s left the game %s.", client.userName, game.Name())
-	// NOCOM(#sirver): the game could care for this
 	if game.Host() == client.Name() {
 		log.Print("This ends the game.")
 		server.RemoveGame(game)
