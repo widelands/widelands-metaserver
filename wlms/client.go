@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"launchpad.net/wlmetaserver/wlms/packet"
+	"launchpad.net/widelands-metaserver/wlms/packet"
 	"log"
 	"net"
 	"reflect"
