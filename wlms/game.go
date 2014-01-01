@@ -1,7 +1,6 @@
 package main
 
 import (
-	"container/list"
 	"log"
 	"time"
 )
@@ -17,7 +16,7 @@ const (
 type Game struct {
 	// The host is also listed in players.
 	host       string
-	players    *list.List
+	players    map[string]bool
 	name       string
 	maxPlayers int
 	state      GameState
@@ -34,7 +33,7 @@ func (game *Game) pingCycle(server *Server) {
 	for {
 		// This game is not even in our list anymore. Give up. If the game has no
 		// host anymore or it has disconnected, remove the game.
-		if server.HasGame(game.Name()) != game || game.players.Len() == 0 {
+		if server.HasGame(game.Name()) != game || len(game.players) == 0 {
 			return
 		}
 		host := server.HasClient(game.Host())
@@ -65,7 +64,7 @@ func (game *Game) pingCycle(server *Server) {
 
 func NewGame(host string, server *Server, gameName string, maxPlayers int) *Game {
 	game := &Game{
-		players:    list.New(),
+		players:    make(map[string]bool),
 		host:       host,
 		name:       gameName,
 		maxPlayers: maxPlayers,
@@ -100,7 +99,7 @@ func (g Game) Host() string {
 }
 
 func (g *Game) AddPlayer(userName string) {
-	g.players.PushBack(userName)
+	g.players[userName] = true
 }
 
 func (g *Game) RemovePlayer(userName string, server *Server) {
@@ -110,14 +109,12 @@ func (g *Game) RemovePlayer(userName string, server *Server) {
 		return
 	}
 
-	for e := g.players.Front(); e != nil; e = e.Next() {
-		if e.Value.(string) == userName {
-			log.Print("%s leaves game %s.", userName, g.name)
-			g.players.Remove(e)
-		}
+	if _, ok := g.players[userName]; ok {
+		log.Print("%s leaves game %s.", userName, g.name)
+		g.players[userName] = false
 	}
 }
 
 func (g Game) NrPlayers() int {
-	return g.players.Len()
+	return len(g.players)
 }
