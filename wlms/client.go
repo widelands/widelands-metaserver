@@ -148,6 +148,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 
 	defer func() {
 		time.AfterFunc(server.ClientForgetTimeout(), func() {
+			client.setGame(nil, server)
 			server.RemoveClient(client)
 		})
 	}()
@@ -319,6 +320,8 @@ func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) CmdE
 		return CmdPacketError{err.Error()}
 	}
 	log.Printf("%s left. Reason: '%s'", client.Name(), reason)
+
+	client.setGame(nil, server)
 
 	client.Disconnect(*server)
 	server.RemoveClient(client)
