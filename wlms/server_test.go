@@ -894,8 +894,8 @@ func (s *EndToEndSuite) TestGameHostLeaving(c *C) {
 	server, clients := gameLeavingSetup(c, true)
 
 	SendPacket(clients[0], "GAME_DISCONNECT")
-	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
 
 	SendPacket(clients[2], "CLIENTS")
 	ExpectPacket(c, clients[2], "CLIENTS", "3",
@@ -910,16 +910,12 @@ func (s *EndToEndSuite) TestGameLeavingNotInGame(c *C) {
 	server, clients := gameLeavingSetup(c, true)
 
 	SendPacket(clients[2], "GAME_DISCONNECT")
-	ExpectPacket(c, clients[2], "ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
-	ExpectClosed(c, clients[2])
-
-	clients = clients[:2]
-	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
 
 	SendPacket(clients[1], "CLIENTS")
-	ExpectPacket(c, clients[1], "CLIENTS", "2",
+	ExpectPacket(c, clients[1], "CLIENTS", "3",
 		"bert", "build-16", "my cool game", "UNREGISTERED", "",
-		"otto", "build-17", "my cool game", "REGISTERED", "")
+		"otto", "build-17", "my cool game", "REGISTERED", "",
+		"SirVer", "build-18", "", "SUPERUSER", "")
 
 	ExpectServerToShutdownCleanly(c, server)
 }

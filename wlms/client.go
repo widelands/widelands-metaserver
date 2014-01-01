@@ -110,11 +110,23 @@ func (client Client) Name() string {
 	return client.userName
 }
 
-func (client *Client) setGame(game *Game, server Server) {
-	if client.game != game {
-		client.game = game
-		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+func (client *Client) setGame(game *Game, server *Server) {
+	if client.game == game {
+		return
 	}
+
+	if client.game != nil {
+		game := client.game
+		log.Printf("%s left the game %s.", client.userName, game.Name())
+		client.game.RemovePlayer(client.Name(), server)
+		client.game = nil
+	}
+
+	if game != nil {
+		client.game = game
+		game.AddPlayer(client.Name())
+	}
+	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 }
 
 func (client *Client) Disconnect(server Server) {
@@ -196,6 +208,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			if !client.waitingForPong {
 				client.restartPingLoop(server.PingCycleTime())
 			} else {
+				log.Printf("%s failed to PONG. Will disconnect.", client.Name())
 				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 				client.Disconnect(*server)
 				if client.pendingRelogin != nil {
@@ -421,8 +434,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 		return CmdPacketError{"GAME_EXISTS"}
 	}
 
-	client.setGame(NewGame(client.Name(), server, gameName, maxPlayer), *server)
-
+	client.setGame(NewGame(client.userName, server, gameName, maxPlayer), server)
 	log.Printf("%s hosts %s.", client.userName, gameName)
 	return nil
 }
@@ -441,12 +453,11 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 		return CmdPacketError{"GAME_FULL"}
 	}
 
-	game.AddPlayer(client.Name())
 	host := server.HasClient(game.Host())
 	log.Printf("%s joined %s at IP %s.", client.userName, game.Name(), host.remoteIp())
 
 	client.SendPacket("GAME_CONNECT", host.remoteIp())
-	client.setGame(game, *server)
+	client.setGame(game, server)
 
 	return nil
 }
@@ -468,19 +479,7 @@ func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) CmdE
 }
 
 func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet) CmdError {
-	if client.game == nil {
-		return InvalidPacketError{}
-	}
-
-	game := client.game
-	client.setGame(nil, *server)
-
-	log.Printf("%s left the game %s.", client.userName, game.Name())
-	if game.Host() == client.Name() {
-		log.Print("This ends the game.")
-		server.RemoveGame(game)
-	}
-	game.RemovePlayer(client.Name())
+	client.setGame(nil, server)
 	return nil
 }
 

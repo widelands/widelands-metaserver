@@ -15,7 +15,8 @@ const (
 )
 
 type Game struct {
-	// The first client is always the host.
+	// The host is also listed in players.
+	host       string
 	players    *list.List
 	name       string
 	maxPlayers int
@@ -62,15 +63,14 @@ func (game *Game) pingCycle(server *Server) {
 	}
 }
 
-func NewGame(hostName string, server *Server, gameName string, maxPlayers int) *Game {
+func NewGame(host string, server *Server, gameName string, maxPlayers int) *Game {
 	game := &Game{
 		players:    list.New(),
+		host:       host,
 		name:       gameName,
 		maxPlayers: maxPlayers,
 		state:      INITIAL_SETUP,
 	}
-	game.players.PushFront(hostName)
-
 	server.AddGame(game)
 
 	go game.pingCycle(server)
@@ -96,19 +96,23 @@ func (g Game) MaxPlayers() int {
 }
 
 func (g Game) Host() string {
-	if g.players.Len() == 0 {
-		return ""
-	}
-	return g.players.Front().Value.(string)
+	return g.host
 }
 
 func (g *Game) AddPlayer(userName string) {
 	g.players.PushBack(userName)
 }
 
-func (g *Game) RemovePlayer(userName string) {
+func (g *Game) RemovePlayer(userName string, server *Server) {
+	if userName == g.host {
+		log.Print("%s leaves game %s. This ends the game.", userName, g.name)
+		server.RemoveGame(g)
+		return
+	}
+
 	for e := g.players.Front(); e != nil; e = e.Next() {
 		if e.Value.(string) == userName {
+			log.Print("%s leaves game %s.", userName, g.name)
 			g.players.Remove(e)
 		}
 	}
