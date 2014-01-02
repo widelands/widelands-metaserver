@@ -203,7 +203,7 @@ func (gpf RealGamePingFactory) New(client *Client, timeout time.Duration) *GameP
 
 	data := make([]byte, len(NETCMD_METASERVER_PING))
 	go func() {
-		conn, err := net.Dial("tcp", net.JoinHostPort(client.remoteIp(), "7396"))
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(client.remoteIp(), "7396"), timeout)
 		if err != nil {
 			pinger.C <- false
 			return
@@ -241,9 +241,9 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		clients:              list.New(),
 		games:                list.New(),
 		user_db:              db,
-		clientSendingTimeout: time.Second * 30,
+		gamePingTimeout:      time.Second * 5,
 		pingCycleTime:        time.Second * 15,
-		gamePingTimeout:      time.Second * 10,
+		clientSendingTimeout: time.Minute * 2,
 		clientForgetTimeout:  time.Minute * 5,
 	}
 	server.gamePingCreator = RealGamePingFactory{server}
