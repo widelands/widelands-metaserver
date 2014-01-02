@@ -162,7 +162,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 		case pkg, ok := <-client.dataStream:
 			if !ok {
 				client.Disconnect(*server)
-				break
+				return
 			}
 			client.waitingForPong = false
 			client.startToPingTimer.Reset(server.PingCycleTime())
@@ -177,7 +177,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			cmdName, err := pkg.ReadString()
 			if err != nil {
 				client.pendingRelogin.Disconnect(*server)
-				break
+				return
 			}
 
 			handlerFunc := reflect.ValueOf(client).MethodByName(strings.Join([]string{"Handle_", cmdName}, ""))
@@ -213,6 +213,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 				client.Disconnect(*server)
 				if client.pendingRelogin != nil {
+					log.Printf("%s has successfully relogged in.", client.Name())
 					client.pendingRelogin.successfulRelogin(server, client)
 				}
 			}
@@ -233,14 +234,14 @@ func newClient(r ReadWriteCloserWithIp) *Client {
 }
 
 func (client *Client) readingLoop(server Server) {
+	defer client.Disconnect(server)
 	for {
 		pkg, err := packet.Read(client.conn)
 		if err != nil {
-			break
+			return
 		}
 		client.dataStream <- pkg
 	}
-	client.Disconnect(server)
 }
 
 func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
@@ -417,9 +418,13 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 	client.userName = oldClient.userName
 	client.buildId = oldClient.buildId
 	client.game = oldClient.game
+
+	log.Printf("%s wants to reconnect.\n", client.Name())
 	if oldClient.state == RECENTLY_DISCONNECTED {
+		log.Printf("Successfully immediately, because we had a recent disconnect.")
 		client.successfulRelogin(server, oldClient)
 	} else {
+		log.Printf("Send to handshaking first.")
 		client.state = HANDSHAKE
 		oldClient.restartPingLoop(server.PingCycleTime())
 		oldClient.pendingRelogin = client
@@ -438,6 +443,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 	}
 
 	client.setGame(NewGame(client.userName, server, gameName, maxPlayer), server)
+
 	log.Printf("%s hosts %s.", client.userName, gameName)
 	return nil
 }

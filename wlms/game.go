@@ -104,13 +104,13 @@ func (g *Game) AddPlayer(userName string) {
 
 func (g *Game) RemovePlayer(userName string, server *Server) {
 	if userName == g.host {
-		log.Print("%s leaves game %s. This ends the game.", userName, g.name)
+		log.Printf("%s leaves game %s. This ends the game.", userName, g.name)
 		server.RemoveGame(g)
 		return
 	}
 
 	if _, ok := g.players[userName]; ok {
-		log.Print("%s leaves game %s.", userName, g.name)
+		log.Printf("%s leaves game %s.", userName, g.name)
 		g.players[userName] = false
 	}
 }
