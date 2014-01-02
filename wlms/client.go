@@ -426,7 +426,8 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 	} else {
 		log.Printf("Send to handshaking first.")
 		client.state = HANDSHAKE
-		oldClient.restartPingLoop(server.PingCycleTime())
+		// Force a quicker ping now, so that handshaking goes smoothly.
+		oldClient.restartPingLoop(server.PingCycleTime() / 3)
 		oldClient.pendingRelogin = client
 	}
 	return nil

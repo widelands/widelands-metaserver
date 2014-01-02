@@ -282,9 +282,8 @@ func (e *EndToEndSuite) TestReloginPingAndNoReply(c *C) {
 
 	SendPacket(clients[1], "RELOGIN", 0, "bert", "build-16", false)
 
-	time.Sleep(6 * time.Millisecond)
+	time.Sleep(2 * time.Millisecond)
 	ExpectPacket(c, clients[0], "PING")
-	ExpectPacket(c, clients[2], "PING")
 
 	SendPacket(clients[2], "PONG")
 	time.Sleep(6 * time.Millisecond) // No reply for client 0
