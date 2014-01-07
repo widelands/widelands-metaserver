@@ -91,6 +91,19 @@ func (s *Server) AddClient(client *Client) {
 }
 
 func (s *Server) RemoveClient(client *Client) {
+	// Sanity check: make sure this user is not in our list of clients more than
+	// once.
+	cnt := 0
+	for e := s.clients.Front(); e != nil; e = e.Next() {
+		if e.Value.(*Client).Name() == client.Name() {
+			cnt++
+		}
+	}
+	if cnt > 1 {
+		log.Printf("Warning: %s is in the client list %i times.", client.Name(), cnt)
+	}
+
+	// Now remove the client for good if it is around.
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client) == client {
 			log.Printf("Removing client %s.", client.Name())
