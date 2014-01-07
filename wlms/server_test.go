@@ -400,6 +400,99 @@ func (e *EndToEndSuite) TestRelogWhileInGame(c *C) {
 	ExpectServerToShutdownCleanly(c, server)
 }
 
+func (e *EndToEndSuite) TestRelogWhileInGameRealWorldExample(c *C) {
+	server, clients, pinger := gameTestSetup(c, false)
+
+	server.SetPingCycleTime(20 * time.Millisecond)
+	server.SetGamePingTimeout(10 * time.Millisecond)
+
+	// The game never replies.
+	for i := 0; i < 50; i++ {
+		pinger.C <- false
+	}
+
+	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
+	ExpectPacketForAll(c, clients[:2], "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients[:2], "CLIENTS_UPDATE")
+	ExpectPacket(c, clients[0], "ERROR", "GAME_OPEN", "GAME_TIMEOUT")
+
+	SendPacket(clients[1], "GAME_CONNECT", "my cool game")
+	ExpectPacket(c, clients[1], "GAME_CONNECT", "192.168.0.0")
+	ExpectPacketForAll(c, clients[:2], "GAMES_UPDATE")
+	ExpectPacketForAll(c, clients[:2], "CLIENTS_UPDATE")
+
+	SendPacket(clients[0], "GAME_START")
+	ExpectPacket(c, clients[0], "GAME_START")
+	ExpectPacketForAll(c, clients[:2], "GAMES_UPDATE")
+
+	// Syncronize ping timers.
+	SendPacket(clients[0], "PONG")
+	SendPacket(clients[1], "PONG")
+	time.Sleep(6 * time.Millisecond)
+	ExpectPacketForAll(c, clients[:2], "PING")
+
+	// No reply for host.
+	SendPacket(clients[1], "PONG")
+	time.Sleep(21 * time.Millisecond)
+
+	// Make sure we see the one player getting disconnected.
+	ExpectPacket(c, clients[0], "DISCONNECT", "CLIENT_TIMEOUT")
+	ExpectPacket(c, clients[1], "PING")
+	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+	SendPacket(clients[1], "PONG")
+	ExpectClosed(c, clients[0])
+
+	// Relogin.
+	SendPacket(clients[2], "RELOGIN", 0, "bert", "build-16", false)
+	ExpectPacket(c, clients[2], "RELOGIN")
+	ExpectPacketForAll(c, clients[1:], "CLIENTS_UPDATE")
+
+	// Syncronize ping timers.
+	SendPacket(clients[1], "PONG")
+	SendPacket(clients[2], "PONG")
+	time.Sleep(6 * time.Millisecond)
+	ExpectPacketForAll(c, clients[1:], "PING")
+
+	// No reply for host (again).
+	SendPacket(clients[1], "PONG")
+	time.Sleep(21 * time.Millisecond)
+
+	// Make sure we see the one player getting disconnected.
+	ExpectPacket(c, clients[2], "DISCONNECT", "CLIENT_TIMEOUT")
+
+	ExpectPacket(c, clients[1], "PING")
+	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+	SendPacket(clients[1], "PONG")
+	ExpectClosed(c, clients[2])
+
+	// Sanity check: only one client on the server?
+	SendPacket(clients[1], "CLIENTS")
+	ExpectPacket(c, clients[1], "CLIENTS", "1",
+		"otto", "build-17", "my cool game", "REGISTERED", "")
+
+	// Let's ping a few times.
+	time.Sleep(21 * time.Millisecond)
+	ExpectPacket(c, clients[1], "PING")
+	SendPacket(clients[1], "PONG")
+
+	// By now the clients should be forgotten and the game deleted.
+	ExpectPacket(c, clients[1], "GAMES_UPDATE")
+	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
+
+	time.Sleep(21 * time.Millisecond)
+	ExpectPacket(c, clients[1], "PING")
+	SendPacket(clients[1], "PONG")
+
+	SendPacket(clients[1], "CLIENTS")
+	ExpectPacket(c, clients[1], "CLIENTS", "1",
+		"otto", "build-17", "my cool game", "REGISTERED", "")
+
+	SendPacket(clients[1], "GAMES")
+	ExpectPacket(c, clients[1], "GAMES", "0")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
 // }}}
 // Test Disconnect {{{
 func (e *EndToEndSuite) TestDisconnect(c *C) {
@@ -590,9 +683,10 @@ func (f FakeGamePingerFactory) New(client *Client, timeout time.Duration) *GameP
 
 func gameTestSetup(c *C, loginThirdConnection bool) (*Server, []FakeConn, GamePinger) {
 	server, clients := SetupServer(c, 3)
+	server.SetClientForgetTimeout(30 * time.Millisecond)
 
 	pinger := GamePinger{
-		make(chan bool),
+		make(chan bool, 100),
 	}
 	server.InjectGamePingCreator(FakeGamePingerFactory{pinger})
 	server.SetGamePingTimeout(5 * time.Millisecond)
@@ -826,7 +920,7 @@ func (s *EndToEndSuite) TestJoinNonexistingGame(c *C) {
 func (s *EndToEndSuite) TestStartGame(c *C) {
 	server, clients, _ := gameTestSetup(c, true)
 
-	server.SetGamePingTimeout(5 * time.Second) // Not interesting in this.
+	server.SetGamePingTimeout(5 * time.Second) // Not interested in this.
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
@@ -861,7 +955,7 @@ func (s *EndToEndSuite) TestStartGame(c *C) {
 func gameLeavingSetup(c *C, loginThirdConnection bool) (*Server, []FakeConn) {
 	server, clients, _ := gameTestSetup(c, true)
 
-	server.SetGamePingTimeout(5 * time.Second) // Not interesting in this.
+	server.SetGamePingTimeout(5 * time.Second) // Not interested in this.
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")

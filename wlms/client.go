@@ -131,10 +131,6 @@ func (client *Client) setGame(game *Game, server *Server) {
 
 func (client *Client) Disconnect(server Server) {
 	client.conn.Close()
-	if client.dataStream != nil {
-		close(client.dataStream)
-		client.dataStream = nil
-	}
 	client.setState(RECENTLY_DISCONNECTED, server)
 }
 
@@ -148,8 +144,10 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 
 	defer func() {
 		time.AfterFunc(server.ClientForgetTimeout(), func() {
-			client.setGame(nil, server)
-			server.RemoveClient(client)
+			if server.HasClient(client.Name()) == client {
+				client.setGame(nil, server)
+				server.RemoveClient(client)
+			}
 		})
 	}()
 
@@ -234,7 +232,7 @@ func newClient(r ReadWriteCloserWithIp) *Client {
 }
 
 func (client *Client) readingLoop(server Server) {
-	defer client.Disconnect(server)
+	defer close(client.dataStream)
 	for {
 		pkg, err := packet.Read(client.conn)
 		if err != nil {
