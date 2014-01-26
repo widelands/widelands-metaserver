@@ -190,6 +190,10 @@ func (s *Server) BroadcastToConnectedClients(data ...interface{}) {
 	}
 }
 
+func (s *Server) BroadcastToIRC(message string) {
+	s.ircbridge.send(message)
+}
+
 func RunServer(db UserDb) {
 	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {
