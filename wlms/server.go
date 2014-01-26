@@ -202,6 +202,7 @@ func RunServer(db UserDb) {
 	defer ln.Close()
 	irc := NewIRCBridge()
 	irc.connect()
+	defer irc.quit()
 
 	C := make(chan ReadWriteCloserWithIp)
 	go func() {
