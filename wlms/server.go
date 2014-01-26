@@ -28,6 +28,7 @@ type Server struct {
 	gamePingTimeout      time.Duration
 	clientForgetTimeout  time.Duration
 	gamePingCreator      GamePingFactory
+	ircbridge            IRCBridge
 }
 
 type GamePingFactory interface {
@@ -87,6 +88,7 @@ func (s *Server) NewGamePinger(client *Client) *GamePinger {
 }
 
 func (s *Server) AddClient(client *Client) {
+	s.ircbridge.send(client.Name() + " has joined the Metaserver lobby")
 	s.clients.PushBack(client)
 }
 
@@ -108,6 +110,7 @@ func (s *Server) RemoveClient(client *Client) {
 		if e.Value.(*Client) == client {
 			log.Printf("Removing client %s.", client.Name())
 			s.clients.Remove(e)
+			s.ircbridge.send(client.Name() + " has left the Metaserver lobby")
 		}
 	}
 }
@@ -145,6 +148,7 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 func (s *Server) AddGame(game *Game) {
 	s.games.PushBack(game)
 	s.BroadcastToConnectedClients("GAMES_UPDATE")
+	s.ircbridge.send("A new game " + game.Name() + " was opened by " + game.Host())
 }
 
 func (s *Server) RemoveGame(game *Game) {
@@ -192,6 +196,8 @@ func RunServer(db UserDb) {
 		log.Fatal(err)
 	}
 	defer ln.Close()
+	irc := NewIRCBridge()
+	irc.connect()
 
 	C := make(chan ReadWriteCloserWithIp)
 	go func() {
@@ -204,7 +210,7 @@ func RunServer(db UserDb) {
 		}
 	}()
 
-	CreateServerUsing(C, db).WaitTillShutdown()
+	CreateServerUsing(C, db, *irc).WaitTillShutdown()
 }
 
 type RealGamePingFactory struct {
@@ -246,7 +252,7 @@ func (server *Server) InjectGamePingCreator(gpf GamePingFactory) {
 	server.gamePingCreator = gpf
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb) *Server {
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, bridge IRCBridge) *Server {
 	server := &Server{
 		acceptedConnections:  acceptedConnections,
 		shutdownServer:       make(chan bool),
@@ -258,6 +264,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		pingCycleTime:        time.Second * 15,
 		clientSendingTimeout: time.Minute * 2,
 		clientForgetTimeout:  time.Minute * 5,
+		ircbridge:            bridge,
 	}
 	server.gamePingCreator = RealGamePingFactory{server}
 	go server.mainLoop()
