@@ -20,7 +20,8 @@ func NewIRCBridge() *IRCBridge {
 }
 
 func (bridge *IRCBridge) connect() {
-	bridge.connection = irc.IRC(bridge.nick, bridge.user) //Create new connection
+	//Create new connection
+	bridge.connection = irc.IRC(bridge.nick, bridge.user)
 	//Set options
 	bridge.connection.UseTLS = true //default is false
 	//connection.TLSOptions //set ssl options
@@ -31,20 +32,16 @@ func (bridge *IRCBridge) connect() {
 		log.Fatal("Can't connect to freenode.")
 	}
 	bridge.connection.Join(bridge.channel)
-	bridge.connection.AddCallback("PRIVMSG", bridge.privmsg)
 }
 
 func (bridge *IRCBridge) quit() {
 	bridge.connection.Quit()
 }
 
-func (bridge *IRCBridge) privmsg(event *irc.Event) {
-	//e.Message contains the message
-	log.Println(event.Message)
-	//e.Nick Contains the sender
-	log.Println(event.Nick)
-	//e.Arguments[0] Contains the channel
-	log.Println(event.Arguments[0])
+func (bridge *IRCBridge) setCallback(callback func(string, string)) {
+	bridge.connection.AddCallback("PRIVMSG", func(e *irc.Event) {
+		callback(e.Nick, e.Message)
+	})
 }
 
 func (bridge *IRCBridge) send(m string) {

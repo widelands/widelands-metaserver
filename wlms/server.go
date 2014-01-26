@@ -218,6 +218,10 @@ func RunServer(db UserDb) {
 	CreateServerUsing(C, db, *irc).WaitTillShutdown()
 }
 
+func (s *Server) privmsg(nick string, message string) {
+	s.BroadcastToConnectedClients("CHAT", nick+"(IRC)", message, "public")
+}
+
 type RealGamePingFactory struct {
 	server *Server
 }
@@ -271,6 +275,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		clientForgetTimeout:  time.Minute * 5,
 		ircbridge:            bridge,
 	}
+	server.ircbridge.setCallback(server.privmsg)
 	server.gamePingCreator = RealGamePingFactory{server}
 	go server.mainLoop()
 	return server
