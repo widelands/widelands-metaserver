@@ -35,35 +35,35 @@ type GamePingFactory interface {
 	New(client *Client, timeout time.Duration) *GamePinger
 }
 
-func (s *Server) ClientSendingTimeout() time.Duration {
+func (s Server) ClientSendingTimeout() time.Duration {
 	return s.clientSendingTimeout
 }
 func (s *Server) SetClientSendingTimeout(d time.Duration) {
 	s.clientSendingTimeout = d
 }
 
-func (s *Server) PingCycleTime() time.Duration {
+func (s Server) PingCycleTime() time.Duration {
 	return s.pingCycleTime
 }
 func (s *Server) SetPingCycleTime(d time.Duration) {
 	s.pingCycleTime = d
 }
 
-func (s *Server) GamePingTimeout() time.Duration {
+func (s Server) GamePingTimeout() time.Duration {
 	return s.gamePingTimeout
 }
 func (s *Server) SetGamePingTimeout(v time.Duration) {
 	s.gamePingTimeout = v
 }
 
-func (s *Server) ClientForgetTimeout() time.Duration {
+func (s Server) ClientForgetTimeout() time.Duration {
 	return s.clientForgetTimeout
 }
 func (s *Server) SetClientForgetTimeout(v time.Duration) {
 	s.clientForgetTimeout = v
 }
 
-func (s *Server) Motd() string {
+func (s Server) Motd() string {
 	return s.motd
 }
 func (s *Server) SetMotd(v string) {
@@ -115,7 +115,7 @@ func (s *Server) RemoveClient(client *Client) {
 	}
 }
 
-func (s *Server) HasClient(name string) *Client {
+func (s Server) HasClient(name string) *Client {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		client := e.Value.(*Client)
 		if client.Name() == name {
@@ -125,7 +125,7 @@ func (s *Server) HasClient(name string) *Client {
 	return nil
 }
 
-func (s *Server) NrActiveClients() int {
+func (s Server) NrActiveClients() int {
 	count := 0
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client).State() == CONNECTED {
@@ -135,7 +135,7 @@ func (s *Server) NrActiveClients() int {
 	return count
 }
 
-func (s *Server) ForeachActiveClient(callback func(*Client)) {
+func (s Server) ForeachActiveClient(callback func(*Client)) {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		client := e.Value.(*Client)
 		if client.State() != CONNECTED {
@@ -161,7 +161,7 @@ func (s *Server) RemoveGame(game *Game) {
 	}
 }
 
-func (s *Server) HasGame(name string) *Game {
+func (s Server) HasGame(name string) *Game {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		game := e.Value.(*Game)
 		if game.Name() == name {
@@ -171,11 +171,11 @@ func (s *Server) HasGame(name string) *Game {
 	return nil
 }
 
-func (s *Server) NrGames() int {
+func (s Server) NrGames() int {
 	return s.games.Len()
 }
 
-func (s *Server) ForeachGame(callback func(*Game)) {
+func (s Server) ForeachGame(callback func(*Game)) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		callback(e.Value.(*Game))
 	}
