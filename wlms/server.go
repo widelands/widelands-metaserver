@@ -194,7 +194,7 @@ func (s *Server) BroadcastToIRC(message string) {
 	s.ircBridge.send(message)
 }
 
-func RunServer(db UserDb) {
+func RunServer(db UserDb, irc IRCBridge) {
 	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {
 		log.Fatal(err)
@@ -212,7 +212,7 @@ func RunServer(db UserDb) {
 		}
 	}()
 
-	CreateServerUsing(C, db).WaitTillShutdown()
+	CreateServerUsing(C, db, irc).WaitTillShutdown()
 }
 
 func (s *Server) BroadcastToLobby(nick string, message string) {
@@ -258,7 +258,7 @@ func (server *Server) InjectGamePingCreator(gpf GamePingFactory) {
 	server.gamePingCreator = gpf
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb) *Server {
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, irc IRCBridge) *Server {
 	server := &Server{
 		acceptedConnections:  acceptedConnections,
 		shutdownServer:       make(chan bool),
@@ -270,7 +270,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		pingCycleTime:        time.Second * 15,
 		clientSendingTimeout: time.Minute * 2,
 		clientForgetTimeout:  time.Minute * 5,
-		ircBridge:            NewIRCBridge(),
+		ircBridge:            irc,
 	}
 	server.ircBridge.connect()
 	server.ircBridge.setCallback(server.BroadcastToLobby)

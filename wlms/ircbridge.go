@@ -9,14 +9,17 @@ import (
 type IRCBridge struct {
 	nick, user, channel, server string
 	connection                  *irc.Connection
+	useTLS                      bool
 }
 
-func NewIRCBridge() IRCBridge {
-	return IRCBridge{
-		nick:    "WLMetaServer",
-		user:    "WLMetaServer",
-		channel: "#widelands-test",
-		server:  "irc.freenode.net:7000"}
+func NewIRCBridge(server, nick, user, channel string, usetls bool) *IRCBridge {
+	return &IRCBridge{
+		nick:    nick,
+		user:    user,
+		channel: channel,
+		server:  server,
+		useTLS:  usetls,
+	}
 }
 
 func (bridge *IRCBridge) connect() {
