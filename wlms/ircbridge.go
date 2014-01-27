@@ -11,8 +11,8 @@ type IRCBridge struct {
 	connection                  *irc.Connection
 }
 
-func NewIRCBridge() *IRCBridge {
-	return &IRCBridge{
+func NewIRCBridge() IRCBridge {
+	return IRCBridge{
 		nick:    "WLMetaServer",
 		user:    "WLMetaServer",
 		channel: "#widelands-test",

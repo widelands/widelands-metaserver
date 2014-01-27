@@ -28,42 +28,42 @@ type Server struct {
 	gamePingTimeout      time.Duration
 	clientForgetTimeout  time.Duration
 	gamePingCreator      GamePingFactory
-	ircbridge            IRCBridge
+	ircBridge            IRCBridge
 }
 
 type GamePingFactory interface {
 	New(client *Client, timeout time.Duration) *GamePinger
 }
 
-func (s Server) ClientSendingTimeout() time.Duration {
+func (s *Server) ClientSendingTimeout() time.Duration {
 	return s.clientSendingTimeout
 }
 func (s *Server) SetClientSendingTimeout(d time.Duration) {
 	s.clientSendingTimeout = d
 }
 
-func (s Server) PingCycleTime() time.Duration {
+func (s *Server) PingCycleTime() time.Duration {
 	return s.pingCycleTime
 }
 func (s *Server) SetPingCycleTime(d time.Duration) {
 	s.pingCycleTime = d
 }
 
-func (s Server) GamePingTimeout() time.Duration {
+func (s *Server) GamePingTimeout() time.Duration {
 	return s.gamePingTimeout
 }
 func (s *Server) SetGamePingTimeout(v time.Duration) {
 	s.gamePingTimeout = v
 }
 
-func (s Server) ClientForgetTimeout() time.Duration {
+func (s *Server) ClientForgetTimeout() time.Duration {
 	return s.clientForgetTimeout
 }
 func (s *Server) SetClientForgetTimeout(v time.Duration) {
 	s.clientForgetTimeout = v
 }
 
-func (s Server) Motd() string {
+func (s *Server) Motd() string {
 	return s.motd
 }
 func (s *Server) SetMotd(v string) {
@@ -88,7 +88,7 @@ func (s *Server) NewGamePinger(client *Client) *GamePinger {
 }
 
 func (s *Server) AddClient(client *Client) {
-	s.ircbridge.send(client.Name() + " has joined the Metaserver lobby")
+	s.BroadcastToIRC(client.Name() + " has joined the Metaserver lobby")
 	s.clients.PushBack(client)
 }
 
@@ -110,7 +110,7 @@ func (s *Server) RemoveClient(client *Client) {
 		if e.Value.(*Client) == client {
 			log.Printf("Removing client %s.", client.Name())
 			s.clients.Remove(e)
-			s.ircbridge.send(client.Name() + " has left the Metaserver lobby")
+			s.BroadcastToIRC(client.Name() + " has left the Metaserver lobby")
 		}
 	}
 }
@@ -135,7 +135,7 @@ func (s *Server) NrActiveClients() int {
 	return count
 }
 
-func (s Server) ForeachActiveClient(callback func(*Client)) {
+func (s *Server) ForeachActiveClient(callback func(*Client)) {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		client := e.Value.(*Client)
 		if client.State() != CONNECTED {
@@ -148,7 +148,7 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 func (s *Server) AddGame(game *Game) {
 	s.games.PushBack(game)
 	s.BroadcastToConnectedClients("GAMES_UPDATE")
-	s.ircbridge.send("A new game " + game.Name() + " was opened by " + game.Host())
+	s.BroadcastToIRC("A new game " + game.Name() + " was opened by " + game.Host())
 }
 
 func (s *Server) RemoveGame(game *Game) {
@@ -175,7 +175,7 @@ func (s *Server) NrGames() int {
 	return s.games.Len()
 }
 
-func (s Server) ForeachGame(callback func(*Game)) {
+func (s *Server) ForeachGame(callback func(*Game)) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		callback(e.Value.(*Game))
 	}
@@ -191,7 +191,7 @@ func (s *Server) BroadcastToConnectedClients(data ...interface{}) {
 }
 
 func (s *Server) BroadcastToIRC(message string) {
-	s.ircbridge.send(message)
+	s.ircBridge.send(message)
 }
 
 func RunServer(db UserDb) {
@@ -200,9 +200,6 @@ func RunServer(db UserDb) {
 		log.Fatal(err)
 	}
 	defer ln.Close()
-	irc := NewIRCBridge()
-	irc.connect()
-	defer irc.quit()
 
 	C := make(chan ReadWriteCloserWithIp)
 	go func() {
@@ -215,10 +212,10 @@ func RunServer(db UserDb) {
 		}
 	}()
 
-	CreateServerUsing(C, db, *irc).WaitTillShutdown()
+	CreateServerUsing(C, db).WaitTillShutdown()
 }
 
-func (s *Server) privmsg(nick string, message string) {
+func (s *Server) BroadcastToLobby(nick string, message string) {
 	s.BroadcastToConnectedClients("CHAT", nick+"(IRC)", message, "public")
 }
 
@@ -261,7 +258,7 @@ func (server *Server) InjectGamePingCreator(gpf GamePingFactory) {
 	server.gamePingCreator = gpf
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, bridge IRCBridge) *Server {
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb) *Server {
 	server := &Server{
 		acceptedConnections:  acceptedConnections,
 		shutdownServer:       make(chan bool),
@@ -273,9 +270,10 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		pingCycleTime:        time.Second * 15,
 		clientSendingTimeout: time.Minute * 2,
 		clientForgetTimeout:  time.Minute * 5,
-		ircbridge:            bridge,
+		ircBridge:            NewIRCBridge(),
 	}
-	server.ircbridge.setCallback(server.privmsg)
+	server.ircBridge.connect()
+	server.ircBridge.setCallback(server.BroadcastToLobby)
 	server.gamePingCreator = RealGamePingFactory{server}
 	go server.mainLoop()
 	return server
@@ -297,6 +295,7 @@ func (s *Server) mainLoop() {
 				s.clients.Remove(e)
 			}
 			close(s.acceptedConnections)
+			s.ircBridge.quit()
 			s.serverHasShutdown <- true
 			return
 		}
