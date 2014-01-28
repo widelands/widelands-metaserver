@@ -9,7 +9,7 @@ import (
 type IRCBridger interface {
 	Connect() bool
 	Quit()
-	Send(message string)
+	recieveMessages(chan string)
 }
 
 type IRCBridge struct {
@@ -49,12 +49,6 @@ func (bridge *IRCBridge) Quit() {
 	bridge.connection.Quit()
 }
 
-func (bridge *IRCBridge) SetCallback(callback func(string, string)) {
-	bridge.connection.AddCallback("PRIVMSG", func(e *irc.Event) {
-		callback(e.Nick, e.Message)
-	})
-}
-
-func (bridge IRCBridge) Send(m string) {
-	bridge.connection.Privmsg(bridge.channel, m)
+func (bridge IRCBridge) recieveMessages(messagesToIrc chan string) {
+	bridge.connection.Privmsg(bridge.channel, <-messagesToIrc)
 }
