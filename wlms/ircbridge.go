@@ -6,47 +6,55 @@ import (
 	"github.com/thoj/go-ircevent"
 )
 
+type IRCBridger interface {
+	Connect() bool
+	Quit()
+	Send(message string)
+}
+
 type IRCBridge struct {
-	nick, user, channel, server string
 	connection                  *irc.Connection
+	nick, user, channel, server string
 	useTLS                      bool
 }
 
-func NewIRCBridge(server, nick, user, channel string, usetls bool) *IRCBridge {
+func NewIRCBridge(server, realname, nickname, channel string, tls bool) *IRCBridge {
 	return &IRCBridge{
-		nick:    nick,
-		user:    user,
-		channel: channel,
 		server:  server,
-		useTLS:  usetls,
+		user:    realname,
+		nick:    nickname,
+		channel: channel,
+		useTLS:  tls,
 	}
 }
 
-func (bridge *IRCBridge) connect() {
+func (bridge *IRCBridge) Connect() bool {
 	//Create new connection
 	bridge.connection = irc.IRC(bridge.nick, bridge.user)
 	//Set options
-	bridge.connection.UseTLS = true //default is false
+	bridge.connection.UseTLS = bridge.useTLS
 	//connection.TLSOptions //set ssl options
 	//connection.Password = "[server password]"
 	//Commands
 	err := bridge.connection.Connect(bridge.server) //Connect to server
 	if err != nil {
-		log.Fatal("Can't connect to freenode.")
+		log.Fatal("Can't connect %s", bridge.server)
+		return false
 	}
 	bridge.connection.Join(bridge.channel)
+	return true
 }
 
-func (bridge *IRCBridge) quit() {
+func (bridge *IRCBridge) Quit() {
 	bridge.connection.Quit()
 }
 
-func (bridge *IRCBridge) setCallback(callback func(string, string)) {
+func (bridge *IRCBridge) SetCallback(callback func(string, string)) {
 	bridge.connection.AddCallback("PRIVMSG", func(e *irc.Event) {
 		callback(e.Nick, e.Message)
 	})
 }
 
-func (bridge *IRCBridge) send(m string) {
+func (bridge IRCBridge) Send(m string) {
 	bridge.connection.Privmsg(bridge.channel, m)
 }

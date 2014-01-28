@@ -9,7 +9,7 @@ import (
 
 type Config struct {
 	Database, User, Password, Table, Backend, IRCServer, Nickname, Realname, Channel string
-	UseTLS, ConnectToIRC                                                             bool
+	UseTLS                                                                           bool
 }
 
 func (l *Config) ConfigFrom(path string) error {
@@ -26,7 +26,7 @@ func main() {
 	flag.Parse()
 
 	var db UserDb
-	var ircbridge IRCBridge
+	var ircbridge IRCBridger
 	if config != "" {
 		var cfg Config
 		if err := cfg.ConfigFrom(config); err != nil {
@@ -37,10 +37,7 @@ func main() {
 		} else {
 			db = NewInMemoryDb()
 		}
-		if cfg.ConnectToIRC {
-			ircbridge := NewIRCBridge(cfg.IRCServer, cfg.Realname, cfg.Nickname, cfg.Channel, cfg.UseTLS)
-			defer ircbridge.quit()
-		}
+		ircbridge = NewIRCBridge(cfg.IRCServer, cfg.Realname, cfg.Nickname, cfg.Channel, cfg.UseTLS)
 	} else {
 		db = NewInMemoryDb()
 	}
