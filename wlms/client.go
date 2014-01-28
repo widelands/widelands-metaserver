@@ -277,7 +277,7 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 
 	if len(receiver) == 0 {
 		server.BroadcastToConnectedClients("CHAT", client.Name(), message, "public")
-		//server.BroadcastToIRC(client.Name() + " : " + message)
+		server.BroadcastToIrc(client.Name(), message)
 	} else {
 		recv_client := server.HasClient(receiver)
 		if recv_client != nil {

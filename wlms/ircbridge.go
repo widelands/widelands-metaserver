@@ -7,7 +7,7 @@ import (
 )
 
 type IRCBridger interface {
-	Connect() bool
+	Connect(chan IRCMessage) bool
 	Quit()
 	recieveMessages(chan string)
 }
@@ -16,6 +16,10 @@ type IRCBridge struct {
 	connection                  *irc.Connection
 	nick, user, channel, server string
 	useTLS                      bool
+}
+
+type IRCMessage struct {
+	message, nick string
 }
 
 func NewIRCBridge(server, realname, nickname, channel string, tls bool) *IRCBridge {
@@ -28,7 +32,7 @@ func NewIRCBridge(server, realname, nickname, channel string, tls bool) *IRCBrid
 	}
 }
 
-func (bridge *IRCBridge) Connect() bool {
+func (bridge *IRCBridge) Connect(returnChannel chan IRCMessage) bool {
 	//Create new connection
 	bridge.connection = irc.IRC(bridge.nick, bridge.user)
 	//Set options
@@ -42,6 +46,14 @@ func (bridge *IRCBridge) Connect() bool {
 		return false
 	}
 	bridge.connection.Join(bridge.channel)
+	bridge.connection.AddCallback("PRIVMSG", func(event *irc.Event) {
+		//e.Message contains the message
+		//e.Nick Contains the sender
+		//e.Arguments[0] Contains the channel
+		returnChannel <- IRCMessage{nick: event.Nick,
+			message: event.Message,
+		}
+	})
 	return true
 }
 
@@ -50,5 +62,7 @@ func (bridge *IRCBridge) Quit() {
 }
 
 func (bridge IRCBridge) recieveMessages(messagesToIrc chan string) {
-	bridge.connection.Privmsg(bridge.channel, <-messagesToIrc)
+	for {
+		bridge.connection.Privmsg(bridge.channel, <-messagesToIrc)
+	}
 }
