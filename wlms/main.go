@@ -43,6 +43,9 @@ func main() {
 	}
 	defer db.Close()
 
-	RunServer(db, ircbridge)
+	messagesToIrc := make(chan Message, 50)
+	messagesToLobby := make(chan Message, 50)
+	ircbridge.Connect(messagesToIrc, messagesToLobby)
+	RunServer(db, messagesToLobby, messagesToIrc)
 
 }

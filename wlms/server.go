@@ -28,9 +28,7 @@ type Server struct {
 	gamePingTimeout      time.Duration
 	clientForgetTimeout  time.Duration
 	gamePingCreator      GamePingFactory
-	ircBridge            IRCBridger
-	toIrc                chan string
-	fromIrc              chan IRCMessage
+	messagesOut          chan Message
 }
 
 type GamePingFactory interface {
@@ -90,7 +88,10 @@ func (s *Server) NewGamePinger(client *Client) *GamePinger {
 }
 
 func (s *Server) AddClient(client *Client) {
-	s.toIrc <- client.Name() + " has joined the lobby."
+	s.messagesOut <- Message{
+		message: client.Name() + " has joined the lobby.",
+		nick:    client.Name(),
+	}
 	s.clients.PushBack(client)
 }
 
@@ -112,7 +113,10 @@ func (s *Server) RemoveClient(client *Client) {
 		if e.Value.(*Client) == client {
 			log.Printf("Removing client %s.", client.Name())
 			s.clients.Remove(e)
-			s.toIrc <- client.Name() + " has left the lobby."
+			s.messagesOut <- Message{
+				message: client.Name() + " has left the lobby.",
+				nick:    client.Name(),
+			}
 		}
 	}
 }
@@ -150,7 +154,9 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 func (s *Server) AddGame(game *Game) {
 	s.games.PushBack(game)
 	s.BroadcastToConnectedClients("GAMES_UPDATE")
-	s.toIrc <- "A new game " + game.Name() + " was opened by " + game.Host()
+	s.messagesOut <- Message{message: "A new game " + game.Name() + " was opened by " + game.Host(),
+		nick: game.Host(),
+	}
 }
 
 func (s *Server) RemoveGame(game *Game) {
@@ -193,10 +199,13 @@ func (s *Server) BroadcastToConnectedClients(data ...interface{}) {
 }
 
 func (s Server) BroadcastToIrc(nick, message string) {
-	s.toIrc <- nick + "(Lobby): " + message
+	s.messagesOut <- Message{
+		message: nick + "(Lobby): " + message,
+		nick:    nick,
+	}
 }
 
-func RunServer(db UserDb, irc IRCBridger) {
+func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
 	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {
 		log.Fatal(err)
@@ -213,10 +222,7 @@ func RunServer(db UserDb, irc IRCBridger) {
 			C <- conn
 		}
 	}()
-	toIrc := make(chan string)
-	fromIrc := make(chan IRCMessage)
-	go irc.recieveMessages(toIrc)
-	CreateServerUsing(C, db, irc, toIrc, fromIrc).WaitTillShutdown()
+	CreateServerUsing(C, db, messagesIn, messagesOut).WaitTillShutdown()
 }
 
 type RealGamePingFactory struct {
@@ -258,7 +264,7 @@ func (server *Server) InjectGamePingCreator(gpf GamePingFactory) {
 	server.gamePingCreator = gpf
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, irc IRCBridger, toIrc chan string, fromIrc chan IRCMessage) *Server {
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, messagesIn chan Message, messagesOut chan Message) *Server {
 	server := &Server{
 		acceptedConnections:  acceptedConnections,
 		shutdownServer:       make(chan bool),
@@ -270,22 +276,16 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		pingCycleTime:        time.Second * 15,
 		clientSendingTimeout: time.Minute * 2,
 		clientForgetTimeout:  time.Minute * 5,
-		ircBridge:            irc,
-		toIrc:                toIrc,
-		fromIrc:              fromIrc,
+		messagesOut:          messagesOut,
 	}
-	server.ircBridge.Connect(fromIrc)
 	server.gamePingCreator = RealGamePingFactory{server}
+	go func() {
+		for m := range messagesIn {
+			server.BroadcastToConnectedClients("CHAT", m.nick, m.message, "public")
+		}
+	}()
 	go server.mainLoop()
-	go server.handleIrcMessages(fromIrc)
 	return server
-}
-
-func (s *Server) handleIrcMessages(m chan IRCMessage) {
-	for {
-		message := <-m
-		s.BroadcastToConnectedClients("CHAT", message.nick, message.message, "public")
-	}
 }
 
 func (s *Server) mainLoop() {
@@ -304,7 +304,6 @@ func (s *Server) mainLoop() {
 				s.clients.Remove(e)
 			}
 			close(s.acceptedConnections)
-			s.ircBridge.Quit()
 			s.serverHasShutdown <- true
 			return
 		}

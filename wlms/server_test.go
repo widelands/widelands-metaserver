@@ -40,7 +40,12 @@ func SetupServer(c *C, nClients int) (*Server, []FakeConn) {
 		cons[i] = NewFakeConn(c)
 		acceptingConnections <- cons[i]
 	}
-	return CreateServerUsing(acceptingConnections, db), cons
+
+	//irc := NewIRCBridge("irc.freenode.net:7000", "wltest", "wltest", "#widelands-test", true)
+	toIrc := make(chan Message, 100)
+	fromIrc := make(chan Message, 100)
+	//irc.Connect(toIrc, fromIrc)
+	return CreateServerUsing(acceptingConnections, db, fromIrc, toIrc), cons
 }
 
 type Matching string

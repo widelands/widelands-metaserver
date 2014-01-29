@@ -7,9 +7,8 @@ import (
 )
 
 type IRCBridger interface {
-	Connect(chan IRCMessage) bool
+	Connect(chan Message, chan Message) bool
 	Quit()
-	recieveMessages(chan string)
 }
 
 type IRCBridge struct {
@@ -18,7 +17,7 @@ type IRCBridge struct {
 	useTLS                      bool
 }
 
-type IRCMessage struct {
+type Message struct {
 	message, nick string
 }
 
@@ -32,7 +31,7 @@ func NewIRCBridge(server, realname, nickname, channel string, tls bool) *IRCBrid
 	}
 }
 
-func (bridge *IRCBridge) Connect(returnChannel chan IRCMessage) bool {
+func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Message) bool {
 	//Create new connection
 	bridge.connection = irc.IRC(bridge.nick, bridge.user)
 	//Set options
@@ -50,19 +49,18 @@ func (bridge *IRCBridge) Connect(returnChannel chan IRCMessage) bool {
 		//e.Message contains the message
 		//e.Nick Contains the sender
 		//e.Arguments[0] Contains the channel
-		returnChannel <- IRCMessage{nick: event.Nick,
+		messagesOut <- Message{nick: event.Nick,
 			message: event.Message,
 		}
 	})
+	go func() {
+		for m := range messagesIn {
+			bridge.connection.Privmsg(bridge.channel, m.message)
+		}
+	}()
 	return true
 }
 
 func (bridge *IRCBridge) Quit() {
 	bridge.connection.Quit()
-}
-
-func (bridge IRCBridge) recieveMessages(messagesToIrc chan string) {
-	for {
-		bridge.connection.Privmsg(bridge.channel, <-messagesToIrc)
-	}
 }
