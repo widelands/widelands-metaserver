@@ -88,10 +88,7 @@ func (s *Server) NewGamePinger(client *Client) *GamePinger {
 }
 
 func (s *Server) AddClient(client *Client) {
-	s.messagesOut <- Message{
-		message: client.Name() + " has joined the lobby.",
-		nick:    client.Name(),
-	}
+	s.BroadcastToIrc(client.Name() + " has joined the lobby.")
 	s.clients.PushBack(client)
 }
 
@@ -154,9 +151,7 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 func (s *Server) AddGame(game *Game) {
 	s.games.PushBack(game)
 	s.BroadcastToConnectedClients("GAMES_UPDATE")
-	s.messagesOut <- Message{message: "A new game " + game.Name() + " was opened by " + game.Host(),
-		nick: game.Host(),
-	}
+	s.BroadcastToIrc("A new game " + game.Name() + " was opened by " + game.Host())
 }
 
 func (s *Server) RemoveGame(game *Game) {
@@ -198,11 +193,15 @@ func (s *Server) BroadcastToConnectedClients(data ...interface{}) {
 	}
 }
 
-func (s Server) BroadcastToIrc(nick, message string) {
-	s.messagesOut <- Message{
-		message: nick + "(Lobby): " + message,
-		nick:    nick,
+func (s Server) BroadcastToIrc(message string) {
+	select {
+	case s.messagesOut <- Message{
+		message: message,
+	}:
+	default:
+		log.Println("Message Queue full.")
 	}
+
 }
 
 func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
@@ -281,7 +280,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 	server.gamePingCreator = RealGamePingFactory{server}
 	go func() {
 		for m := range messagesIn {
-			server.BroadcastToConnectedClients("CHAT", m.nick, m.message, "public")
+			server.BroadcastToConnectedClients("CHAT", m.nick+"(IRC)", m.message, "public")
 		}
 	}()
 	go server.mainLoop()

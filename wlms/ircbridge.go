@@ -49,9 +49,14 @@ func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Messa
 		//e.Message contains the message
 		//e.Nick Contains the sender
 		//e.Arguments[0] Contains the channel
-		messagesOut <- Message{nick: event.Nick,
+		select {
+		case messagesOut <- Message{nick: event.Nick,
 			message: event.Message,
+		}:
+		default:
+			log.Println("Message Queue full.")
 		}
+
 	})
 	go func() {
 		for m := range messagesIn {
