@@ -49,6 +49,8 @@ func (game *Game) pingCycle(server *Server) {
 			case INITIAL_SETUP:
 				host.SendPacket("GAME_OPEN")
 				game.SetState(*server, CONNECTABLE)
+			case NOT_CONNECTABLE:
+				game.SetState(*server, CONNECTABLE)
 			case CONNECTABLE, RUNNING:
 				// Do nothing
 			default:
@@ -60,6 +62,8 @@ func (game *Game) pingCycle(server *Server) {
 			case INITIAL_SETUP:
 				host.SendPacket("ERROR", "GAME_OPEN", "GAME_TIMEOUT")
 				game.SetState(*server, NOT_CONNECTABLE)
+			case NOT_CONNECTABLE:
+				// Do nothing.
 			case CONNECTABLE, RUNNING:
 				return
 			default:
