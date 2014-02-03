@@ -11,6 +11,7 @@ const (
 	INITIAL_SETUP GameState = iota
 	NOT_CONNECTABLE
 	CONNECTABLE
+	RUNNING
 )
 
 type Game struct {
@@ -44,19 +45,26 @@ func (game *Game) pingCycle(server *Server) {
 		success, ok := <-pinger.C
 		if success && ok {
 			log.Printf("Successfull ping reply from game %s.", game.Name())
-			if game.state == INITIAL_SETUP {
+			switch game.state {
+			case INITIAL_SETUP:
 				host.SendPacket("GAME_OPEN")
+				game.SetState(*server, CONNECTABLE)
+			case CONNECTABLE, RUNNING:
+				// Do nothing
+			default:
+				log.Fatalf("Unhandled game.state: %v", game.state)
 			}
-			game.SetState(*server, CONNECTABLE)
 		} else {
 			log.Printf("Failed ping reply from game %s.", game.Name())
 			switch game.state {
 			case INITIAL_SETUP:
 				host.SendPacket("ERROR", "GAME_OPEN", "GAME_TIMEOUT")
-			case CONNECTABLE:
+				game.SetState(*server, NOT_CONNECTABLE)
+			case CONNECTABLE, RUNNING:
 				return
+			default:
+				log.Fatalf("Unhandled game.state: %v", game.state)
 			}
-			game.SetState(*server, NOT_CONNECTABLE)
 		}
 		time.Sleep(server.GamePingTimeout())
 	}

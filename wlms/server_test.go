@@ -1,11 +1,11 @@
 package main
 
 import (
-	. "launchpad.net/gocheck"
-	"launchpad.net/widelands-metaserver/wlms/packet"
 	"log"
 	"testing"
 	"time"
+	. "launchpad.net/gocheck"
+	"launchpad.net/widelands-metaserver/wlms/packet"
 )
 
 // Hook up gocheck into the gotest runner.
@@ -423,6 +423,8 @@ func (e *EndToEndSuite) TestRelogWhileInGameRealWorldExample(c *C) {
 
 	SendPacket(clients[0], "GAME_START")
 	ExpectPacket(c, clients[0], "GAME_START")
+	// One for not being connectable, one for game starting.
+	ExpectPacketForAll(c, clients[:2], "GAMES_UPDATE")
 	ExpectPacketForAll(c, clients[:2], "GAMES_UPDATE")
 
 	// Syncronize ping timers.
@@ -476,7 +478,6 @@ func (e *EndToEndSuite) TestRelogWhileInGameRealWorldExample(c *C) {
 	SendPacket(clients[1], "PONG")
 
 	// By now the clients should be forgotten and the game deleted.
-	ExpectPacket(c, clients[1], "GAMES_UPDATE")
 	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
 
 	time.Sleep(21 * time.Millisecond)
@@ -918,13 +919,17 @@ func (s *EndToEndSuite) TestJoinNonexistingGame(c *C) {
 // }}}
 // Test Game Starting {{{
 func (s *EndToEndSuite) TestStartGame(c *C) {
-	server, clients, _ := gameTestSetup(c, true)
+	server, clients, pinger := gameTestSetup(c, true)
 
 	server.SetGamePingTimeout(5 * time.Second) // Not interested in this.
 
 	SendPacket(clients[0], "GAME_OPEN", "my cool game", 8)
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
 	ExpectPacketForAll(c, clients, "CLIENTS_UPDATE")
+
+	pinger.C <- true
+	ExpectPacket(c, clients[0], "GAME_OPEN")
+	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
 
 	SendPacket(clients[1], "GAME_CONNECT", "my cool game")
 	ExpectPacket(c, clients[1], "GAME_CONNECT", "192.168.0.0")
@@ -945,6 +950,11 @@ func (s *EndToEndSuite) TestStartGame(c *C) {
 	SendPacket(clients[0], "GAME_START")
 	ExpectPacket(c, clients[0], "GAME_START")
 	ExpectPacketForAll(c, clients, "GAMES_UPDATE")
+
+	// Ask for games.
+	SendPacket(clients[1], "GAMES")
+	ExpectPacket(c, clients[1], "GAMES", "1",
+		"my cool game", "build-16", "false")
 
 	ExpectServerToShutdownCleanly(c, server)
 }
