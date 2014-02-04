@@ -41,7 +41,7 @@ func SetupServer(c *C, nClients int) (*Server, []FakeConn) {
 		acceptingConnections <- cons[i]
 	}
 
-	//irc := NewIRCBridge("irc.freenode.net:7000", "wltest", "wltest", "#widelands-test", true)
+	//irc := NewIRCBridge("chat.freenode.net:7000", "wltest", "wltest", "#widelands-test", true)
 	toIrc := make(chan Message, 100)
 	fromIrc := make(chan Message, 100)
 	//irc.Connect(toIrc, fromIrc)
