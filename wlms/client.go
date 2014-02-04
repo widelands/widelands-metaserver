@@ -481,7 +481,7 @@ func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) CmdE
 	}
 
 	client.SendPacket("GAME_START")
-	server.BroadcastToConnectedClients("GAMES_UPDATE")
+	client.game.SetState(*server, RUNNING)
 
 	log.Printf("%s has started.", client.game.Name())
 	return nil
