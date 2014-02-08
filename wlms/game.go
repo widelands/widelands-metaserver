@@ -31,6 +31,7 @@ func (game *Game) pingCycle(server *Server) {
 	// Remember to remove the game when we no longer receive pings.
 	defer server.RemoveGame(game)
 
+	first_ping := true
 	for {
 		// This game is not even in our list anymore. Give up. If the game has no
 		// host anymore or it has disconnected, remove the game.
@@ -41,7 +42,13 @@ func (game *Game) pingCycle(server *Server) {
 		if host == nil {
 			return
 		}
-		pinger := server.NewGamePinger(host)
+		pingTimeout := server.GamePingTimeout()
+		if first_ping {
+			pingTimeout = server.GameInitialPingTimeout()
+		}
+		first_ping = false
+
+		pinger := server.NewGamePinger(host, pingTimeout)
 		success, ok := <-pinger.C
 		if success && ok {
 			log.Printf("Successfull ping reply from game %s.", game.Name())
