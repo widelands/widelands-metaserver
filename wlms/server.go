@@ -25,13 +25,19 @@ type Server struct {
 	motd                 string
 	clientSendingTimeout time.Duration
 	pingCycleTime        time.Duration
-	gamePingTimeout      time.Duration
-	clientForgetTimeout  time.Duration
-	gamePingCreator      GamePingFactory
-	messagesOut          chan Message
+
+	// Time in which a game has to respond to the first ping.
+	gameInitialPingTimeout time.Duration
+
+	// Time a game has to respond to all consecutive pings.
+	gamePingTimeout time.Duration
+
+	clientForgetTimeout time.Duration
+	gamePingerFactory   GamePingerFactory
+	messagesOut         chan Message
 }
 
-type GamePingFactory interface {
+type GamePingerFactory interface {
 	New(client *Client, timeout time.Duration) *GamePinger
 }
 
@@ -54,6 +60,13 @@ func (s Server) GamePingTimeout() time.Duration {
 }
 func (s *Server) SetGamePingTimeout(v time.Duration) {
 	s.gamePingTimeout = v
+}
+
+func (s Server) GameInitialPingTimeout() time.Duration {
+	return s.gameInitialPingTimeout
+}
+func (s *Server) SetGameInitialPingTimeout(v time.Duration) {
+	s.gameInitialPingTimeout = v
 }
 
 func (s Server) ClientForgetTimeout() time.Duration {
@@ -83,8 +96,8 @@ func (s *Server) WaitTillShutdown() {
 	<-s.serverHasShutdown
 }
 
-func (s *Server) NewGamePinger(client *Client) *GamePinger {
-	return s.gamePingCreator.New(client, s.gamePingTimeout)
+func (s *Server) NewGamePinger(client *Client, ping_timeout time.Duration) *GamePinger {
+	return s.gamePingerFactory.New(client, ping_timeout)
 }
 
 func (s *Server) AddClient(client *Client) {
@@ -224,11 +237,11 @@ func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
 	CreateServerUsing(C, db, messagesIn, messagesOut).WaitTillShutdown()
 }
 
-type RealGamePingFactory struct {
+type RealGamePingerFactory struct {
 	server *Server
 }
 
-func (gpf RealGamePingFactory) New(client *Client, timeout time.Duration) *GamePinger {
+func (gpf RealGamePingerFactory) New(client *Client, timeout time.Duration) *GamePinger {
 	pinger := &GamePinger{make(chan bool)}
 
 	data := make([]byte, len(NETCMD_METASERVER_PING))
@@ -259,25 +272,26 @@ func (gpf RealGamePingFactory) New(client *Client, timeout time.Duration) *GameP
 	return pinger
 }
 
-func (server *Server) InjectGamePingCreator(gpf GamePingFactory) {
-	server.gamePingCreator = gpf
+func (server *Server) InjectGamePingerFactory(gpf GamePingerFactory) {
+	server.gamePingerFactory = gpf
 }
 
 func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, messagesIn chan Message, messagesOut chan Message) *Server {
 	server := &Server{
-		acceptedConnections:  acceptedConnections,
-		shutdownServer:       make(chan bool),
-		serverHasShutdown:    make(chan bool),
-		clients:              list.New(),
-		games:                list.New(),
-		user_db:              db,
-		gamePingTimeout:      time.Second * 5,
-		pingCycleTime:        time.Second * 15,
-		clientSendingTimeout: time.Minute * 2,
-		clientForgetTimeout:  time.Minute * 5,
-		messagesOut:          messagesOut,
+		acceptedConnections:    acceptedConnections,
+		shutdownServer:         make(chan bool),
+		serverHasShutdown:      make(chan bool),
+		clients:                list.New(),
+		games:                  list.New(),
+		user_db:                db,
+		gameInitialPingTimeout: time.Second * 10,
+		gamePingTimeout:        time.Second * 30,
+		pingCycleTime:          time.Second * 15,
+		clientSendingTimeout:   time.Minute * 2,
+		clientForgetTimeout:    time.Minute * 5,
+		messagesOut:            messagesOut,
 	}
-	server.gamePingCreator = RealGamePingFactory{server}
+	server.gamePingerFactory = RealGamePingerFactory{server}
 	go func() {
 		for m := range messagesIn {
 			server.BroadcastToConnectedClients("CHAT", m.nick+"(IRC)", m.message, "public")

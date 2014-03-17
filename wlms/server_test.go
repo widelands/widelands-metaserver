@@ -694,7 +694,7 @@ func gameTestSetup(c *C, loginThirdConnection bool) (*Server, []FakeConn, GamePi
 	pinger := GamePinger{
 		make(chan bool, 100),
 	}
-	server.InjectGamePingCreator(FakeGamePingerFactory{pinger})
+	server.InjectGamePingerFactory(FakeGamePingerFactory{pinger})
 	server.SetGamePingTimeout(5 * time.Millisecond)
 
 	ExpectLoginAsUnregisteredWorks(c, clients[0], "bert")
