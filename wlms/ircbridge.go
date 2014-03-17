@@ -44,7 +44,7 @@ func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Messa
 		log.Fatal("Can't connect %s", bridge.server)
 		return false
 	}
-	bridge.connection.Join(bridge.channel)
+	bridge.connection.AddCallback("001", func(e *irc.Event) { bridge.connection.Join(bridge.channel) })
 	bridge.connection.AddCallback("PRIVMSG", func(event *irc.Event) {
 		//e.Message contains the message
 		//e.Nick Contains the sender
