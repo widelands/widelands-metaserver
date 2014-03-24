@@ -1,11 +1,11 @@
 package main
 
 import (
+	. "launchpad.net/gocheck"
+	"launchpad.net/widelands-metaserver/wlms/packet"
 	"log"
 	"testing"
 	"time"
-	. "launchpad.net/gocheck"
-	"launchpad.net/widelands-metaserver/wlms/packet"
 )
 
 // Hook up gocheck into the gotest runner.
@@ -40,7 +40,12 @@ func SetupServer(c *C, nClients int) (*Server, []FakeConn) {
 		cons[i] = NewFakeConn(c)
 		acceptingConnections <- cons[i]
 	}
-	return CreateServerUsing(acceptingConnections, db), cons
+
+	//irc := NewIRCBridge("chat.freenode.net:7000", "wltest", "wltest", "#widelands-test", true)
+	toIrc := make(chan Message, 100)
+	fromIrc := make(chan Message, 100)
+	//irc.Connect(toIrc, fromIrc)
+	return CreateServerUsing(acceptingConnections, db, fromIrc, toIrc), cons
 }
 
 type Matching string
@@ -1021,6 +1026,18 @@ func (s *EndToEndSuite) TestGameLeavingNotInGame(c *C) {
 		"SirVer", "build-18", "", "SUPERUSER", "")
 
 	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestIRCBridge(c *C) {
+	var ircbridge = NewIRCBridge("chat.freenode.net:7000", "IRCTest", "IRCTest", "widelands-test", true)
+	messagesToIrc := make(chan Message, 50)
+	messagesToLobby := make(chan Message, 50)
+	ircbridge.Connect(messagesToIrc, messagesToLobby)
+	messagesToIrc <- Message{
+		nick:    "Test",
+		message: "Hello",
+	}
+	ircbridge.Quit()
 }
 
 // }}}

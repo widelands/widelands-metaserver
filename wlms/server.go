@@ -33,10 +33,11 @@ type Server struct {
 	gamePingTimeout time.Duration
 
 	clientForgetTimeout time.Duration
-	gamePingerFactory   GampPingerFactory
+	gamePingerFactory   GamePingerFactory
+	messagesOut         chan Message
 }
 
-type GampPingerFactory interface {
+type GamePingerFactory interface {
 	New(client *Client, timeout time.Duration) *GamePinger
 }
 
@@ -100,6 +101,7 @@ func (s *Server) NewGamePinger(client *Client, ping_timeout time.Duration) *Game
 }
 
 func (s *Server) AddClient(client *Client) {
+	s.BroadcastToIrc(client.Name() + " has joined the lobby.")
 	s.clients.PushBack(client)
 }
 
@@ -121,11 +123,15 @@ func (s *Server) RemoveClient(client *Client) {
 		if e.Value.(*Client) == client {
 			log.Printf("Removing client %s.", client.Name())
 			s.clients.Remove(e)
+			s.messagesOut <- Message{
+				message: client.Name() + " has left the lobby.",
+				nick:    client.Name(),
+			}
 		}
 	}
 }
 
-func (s *Server) HasClient(name string) *Client {
+func (s Server) HasClient(name string) *Client {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		client := e.Value.(*Client)
 		if client.Name() == name {
@@ -135,7 +141,7 @@ func (s *Server) HasClient(name string) *Client {
 	return nil
 }
 
-func (s *Server) NrActiveClients() int {
+func (s Server) NrActiveClients() int {
 	count := 0
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client).State() == CONNECTED {
@@ -158,6 +164,7 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 func (s *Server) AddGame(game *Game) {
 	s.games.PushBack(game)
 	s.BroadcastToConnectedClients("GAMES_UPDATE")
+	s.BroadcastToIrc("A new game " + game.Name() + " was opened by " + game.Host())
 }
 
 func (s *Server) RemoveGame(game *Game) {
@@ -170,7 +177,7 @@ func (s *Server) RemoveGame(game *Game) {
 	}
 }
 
-func (s *Server) HasGame(name string) *Game {
+func (s Server) HasGame(name string) *Game {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		game := e.Value.(*Game)
 		if game.Name() == name {
@@ -180,7 +187,7 @@ func (s *Server) HasGame(name string) *Game {
 	return nil
 }
 
-func (s *Server) NrGames() int {
+func (s Server) NrGames() int {
 	return s.games.Len()
 }
 
@@ -199,7 +206,18 @@ func (s *Server) BroadcastToConnectedClients(data ...interface{}) {
 	}
 }
 
-func RunServer(db UserDb) {
+func (s Server) BroadcastToIrc(message string) {
+	select {
+	case s.messagesOut <- Message{
+		message: message,
+	}:
+	default:
+		log.Println("Message Queue full.")
+	}
+
+}
+
+func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
 	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {
 		log.Fatal(err)
@@ -216,8 +234,7 @@ func RunServer(db UserDb) {
 			C <- conn
 		}
 	}()
-
-	CreateServerUsing(C, db).WaitTillShutdown()
+	CreateServerUsing(C, db, messagesIn, messagesOut).WaitTillShutdown()
 }
 
 type RealGamePingerFactory struct {
@@ -255,11 +272,11 @@ func (gpf RealGamePingerFactory) New(client *Client, timeout time.Duration) *Gam
 	return pinger
 }
 
-func (server *Server) InjectGamePingerFactory(gpf GampPingerFactory) {
+func (server *Server) InjectGamePingerFactory(gpf GamePingerFactory) {
 	server.gamePingerFactory = gpf
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb) *Server {
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, messagesIn chan Message, messagesOut chan Message) *Server {
 	server := &Server{
 		acceptedConnections:    acceptedConnections,
 		shutdownServer:         make(chan bool),
@@ -272,8 +289,14 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		pingCycleTime:          time.Second * 15,
 		clientSendingTimeout:   time.Minute * 2,
 		clientForgetTimeout:    time.Minute * 5,
+		messagesOut:            messagesOut,
 	}
 	server.gamePingerFactory = RealGamePingerFactory{server}
+	go func() {
+		for m := range messagesIn {
+			server.BroadcastToConnectedClients("CHAT", m.nick+"(IRC)", m.message, "public")
+		}
+	}()
 	go server.mainLoop()
 	return server
 }
