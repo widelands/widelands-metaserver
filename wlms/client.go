@@ -67,7 +67,13 @@ type Client struct {
 	// the buildId of Widelands executable that this client is using.
 	buildId string
 
-	// the nonce to link multiple connections by the same client.
+	// The nonce to link multiple connections by the same client.
+	// When a network client connects with (RE)LOGIN he also sends a nonce
+	// which is stored in this field. When "another" netclient connects and
+	// sends TELL_IP containing the same nonce, it is considered the
+	// same game client connecting with another IP.
+	// This way, two connections by IPv4 and IPv6 can be matched so
+	// the server learns both addresses of the client.
 	nonce string
 
 	// the IP of the secondary connection.
@@ -271,7 +277,7 @@ func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
 func (client Client) remoteIp() string {
 	host, _, err := net.SplitHostPort(client.conn.RemoteAddr().String())
 	if err != nil {
-		log.Fatalf("%s is not valid.", client.remoteIp())
+		log.Fatalf("%s has no valid ip address.", client.userName)
 	}
 	return host
 }

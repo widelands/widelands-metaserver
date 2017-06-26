@@ -30,28 +30,29 @@ type GamePinger struct {
 	C chan bool
 }
 
-func (game *Game) handlePingResult(server *Server, result bool, is_v4 bool) {
+func (game *Game) doPing(server *Server, host string, pingTimeout time.Duration) bool {
+	pinger := server.NewGamePinger(host, pingTimeout)
+	success, ok := <-pinger.C
+	result := success && ok
+	state_to_check := CONNECTABLE_V4
+	if net.ParseIP(host).To4() == nil {
+		// If it isn't a IPv4 address, it must be a IPv6 address
+		state_to_check = CONNECTABLE_V6
+	}
+
 	if result {
 		log.Printf("Successfull ping reply from game %s.", game.Name())
 		switch game.state {
 		case INITIAL_SETUP:
-			if is_v4 {
-				game.SetState(*server, CONNECTABLE_V4)
-			} else {
-				game.SetState(*server, CONNECTABLE_V6)
-			}
+			game.SetState(*server, state_to_check)
 		case NOT_CONNECTABLE:
-			if is_v4 {
-				game.SetState(*server, CONNECTABLE_V4)
-			} else {
-				game.SetState(*server, CONNECTABLE_V6)
-			}
+			game.SetState(*server, state_to_check)
 		case CONNECTABLE_V4:
-			if !is_v4 {
+			if state_to_check == CONNECTABLE_V6 {
 				game.SetState(*server, CONNECTABLE_BOTH)
 			}
 		case CONNECTABLE_V6:
-			if is_v4 {
+			if state_to_check == CONNECTABLE_V4 {
 				game.SetState(*server, CONNECTABLE_BOTH)
 			}
 		case CONNECTABLE_BOTH, RUNNING:
@@ -67,15 +68,15 @@ func (game *Game) handlePingResult(server *Server, result bool, is_v4 bool) {
 		case NOT_CONNECTABLE:
 			// Do nothing.
 		case CONNECTABLE_V4:
-			if is_v4 {
+			if state_to_check == CONNECTABLE_V4 {
 				game.SetState(*server, NOT_CONNECTABLE)
 			}
 		case CONNECTABLE_V6:
-			if !is_v4 {
+			if state_to_check == CONNECTABLE_V6 {
 				game.SetState(*server, NOT_CONNECTABLE)
 			}
 		case CONNECTABLE_BOTH:
-			if is_v4 {
+			if state_to_check == CONNECTABLE_V4 {
 				game.SetState(*server, CONNECTABLE_V6)
 			} else {
 				game.SetState(*server, CONNECTABLE_V4)
@@ -86,6 +87,7 @@ func (game *Game) handlePingResult(server *Server, result bool, is_v4 bool) {
 			log.Fatalf("Unhandled game.state: %v", game.state)
 		}
 	}
+	return result
 }
 
 func (game *Game) pingCycle(server *Server) {
@@ -115,18 +117,11 @@ func (game *Game) pingCycle(server *Server) {
 		// first round or if there is only one IP address
 		if ping_primary_ip || host.otherIp() == "" {
 			// Primary IP
-			pinger := server.NewGamePinger(host.remoteIp(), pingTimeout)
-			success, ok := <-pinger.C
-			connected = success && ok
-			game.handlePingResult(server, connected, net.ParseIP(host.remoteIp()).To4() != nil)
+			connected = game.doPing(server, host.remoteIp(), pingTimeout)
 		}
 		if (!ping_primary_ip || first_ping) && host.otherIp() != "" {
 			// Secondary IP
-			pinger := server.NewGamePinger(host.otherIp(), pingTimeout)
-			success, ok := <-pinger.C
-			connected = success && ok
-			game.handlePingResult(server, connected, net.ParseIP(host.otherIp()).To4() != nil)
-
+			connected = game.doPing(server, host.otherIp(), pingTimeout) || connected
 		}
 		if first_ping {
 			// On first ping, inform the client about the result
