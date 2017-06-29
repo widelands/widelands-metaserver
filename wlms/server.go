@@ -38,7 +38,7 @@ type Server struct {
 }
 
 type GamePingerFactory interface {
-	New(client *Client, timeout time.Duration) *GamePinger
+	New(ip string, timeout time.Duration) *GamePinger
 }
 
 func (s Server) ClientSendingTimeout() time.Duration {
@@ -96,8 +96,8 @@ func (s *Server) WaitTillShutdown() {
 	<-s.serverHasShutdown
 }
 
-func (s *Server) NewGamePinger(client *Client, ping_timeout time.Duration) *GamePinger {
-	return s.gamePingerFactory.New(client, ping_timeout)
+func (s *Server) NewGamePinger(ip string, ping_timeout time.Duration) *GamePinger {
+	return s.gamePingerFactory.New(ip, ping_timeout)
 }
 
 func (s *Server) AddClient(client *Client) {
@@ -241,12 +241,12 @@ type RealGamePingerFactory struct {
 	server *Server
 }
 
-func (gpf RealGamePingerFactory) New(client *Client, timeout time.Duration) *GamePinger {
+func (gpf RealGamePingerFactory) New(ip string, timeout time.Duration) *GamePinger {
 	pinger := &GamePinger{make(chan bool)}
 
 	data := make([]byte, len(NETCMD_METASERVER_PING))
 	go func() {
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort(client.remoteIp(), "7396"), timeout)
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "7396"), timeout)
 		if err != nil {
 			pinger.C <- false
 			return

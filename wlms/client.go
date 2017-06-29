@@ -67,6 +67,23 @@ type Client struct {
 	// the buildId of Widelands executable that this client is using.
 	buildId string
 
+	// The nonce to link multiple connections by the same client.
+	// When a network client connects with (RE)LOGIN he also sends a nonce
+	// which is stored in this field. When "another" netclient connects and
+	// sends TELL_IP containing the same nonce, it is considered the
+	// same game client connecting with another IP.
+	// This way, two connections by IPv4 and IPv6 can be matched so
+	// the server learns both addresses of the client.
+	nonce string
+
+	// the IP of the secondary connection.
+	// usually this is an IPv4 address.
+	secondaryIp string
+
+	// Whether this client has a known IPv4/6 address.
+	hasV4 bool
+	hasV6 bool
+
 	// The game we are currently in. nil if not in game.
 	game *Game
 
@@ -154,6 +171,13 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	client.startToPingTimer.Reset(server.PingCycleTime())
 	client.timeoutTimer.Reset(server.ClientSendingTimeout())
 	client.waitingForPong = false
+
+	ip := net.ParseIP(client.remoteIp())
+	if ip.To4() != nil {
+		client.hasV4 = true
+	} else {
+		client.hasV6 = true
+	}
 
 	for {
 		select {
@@ -253,9 +277,13 @@ func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
 func (client Client) remoteIp() string {
 	host, _, err := net.SplitHostPort(client.conn.RemoteAddr().String())
 	if err != nil {
-		log.Fatalf("%s is not valid.", client.remoteIp())
+		log.Fatalf("%s has no valid ip address.", client.userName)
 	}
 	return host
+}
+
+func (client Client) otherIp() string {
+	return client.secondaryIp
 }
 
 func (newClient *Client) successfulRelogin(server *Server, oldClient *Client) {
@@ -338,8 +366,16 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 		return CriticalCmdPacketError{err.Error()}
 	}
 
-	if c.protocolVersion != 0 {
+	if c.protocolVersion != 0 && c.protocolVersion != 1 {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
+	}
+
+	if isRegisteredOnServer || c.protocolVersion == 1 {
+		nonce, err := pkg.ReadString()
+		if err != nil {
+			return CriticalCmdPacketError{err.Error()}
+		}
+		c.nonce = nonce
 	}
 
 	if isRegisteredOnServer {
@@ -349,11 +385,7 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 		if !server.UserDb().ContainsName(c.userName) {
 			return CriticalCmdPacketError{"WRONG_PASSWORD"}
 		}
-		password, err := pkg.ReadString()
-		if err != nil {
-			return CriticalCmdPacketError{err.Error()}
-		}
-		if !server.UserDb().PasswordCorrect(c.userName, password) {
+		if !server.UserDb().PasswordCorrect(c.userName, c.nonce) {
 			return CriticalCmdPacketError{"WRONG_PASSWORD"}
 		}
 		c.permissions = server.UserDb().Permissions(c.userName)
@@ -381,9 +413,17 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdError {
 	var isRegisteredOnServer bool
 	var protocolVersion int
-	var userName, buildId string
+	var userName, buildId, nonce string
 	if err := pkg.Unpack(&protocolVersion, &userName, &buildId, &isRegisteredOnServer); err != nil {
 		return CriticalCmdPacketError{err.Error()}
+	}
+
+	if isRegisteredOnServer || protocolVersion == 1 {
+		n, err := pkg.ReadString()
+		if err != nil {
+			return CriticalCmdPacketError{err.Error()}
+		}
+		nonce = n
 	}
 
 	oldClient := server.HasClient(userName)
@@ -396,11 +436,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 			buildId == oldClient.buildId
 
 	if isRegisteredOnServer {
-		password, err := pkg.ReadString()
-		if err != nil {
-			return CriticalCmdPacketError{err.Error()}
-		}
-		if oldClient.permissions == UNREGISTERED || !server.UserDb().PasswordCorrect(userName, password) {
+		if oldClient.permissions == UNREGISTERED || !server.UserDb().PasswordCorrect(userName, nonce) {
 			informationMatches = false
 		}
 	} else if oldClient.permissions != UNREGISTERED {
@@ -417,6 +453,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 	client.userName = oldClient.userName
 	client.buildId = oldClient.buildId
 	client.game = oldClient.game
+	client.nonce = nonce
 
 	log.Printf("%s wants to reconnect.\n", client.Name())
 	if oldClient.state == RECENTLY_DISCONNECTED {
@@ -431,6 +468,42 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 	}
 	return nil
 }
+
+func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdError {
+	var protocolVersion int
+	var name, nonce string
+	if err := pkg.Unpack(&protocolVersion, &name, &nonce); err != nil {
+		return CmdPacketError{err.Error()}
+	}
+
+	if protocolVersion != 1 {
+		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
+	}
+
+	old_client := server.HasClient(name)
+	if old_client == nil || old_client.userName != name || old_client.nonce != nonce {
+		log.Printf("Someone failed to register an IP for %s.", old_client.Name())
+		return CriticalCmdPacketError{"NOT_LOGGED_IN"}
+	}
+
+	// We found the existing connection of this client.
+	// Update his IP and close this connection.
+	old_client.secondaryIp = client.remoteIp()
+	ip := net.ParseIP(old_client.otherIp())
+	if ip.To4() != nil {
+		old_client.hasV4 = true
+	} else {
+		old_client.hasV6 = true
+	}
+	log.Printf("%s is now known to use %s and %s.", old_client.Name(), old_client.remoteIp(), old_client.otherIp())
+	client.Disconnect(*server)
+	// Tell the client to get a new list of games. The availability of games might have changed now that
+	// he supports more IP versions
+	old_client.SendPacket("GAMES_UPDATE")
+
+	return nil
+}
+
 
 func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdError {
 	var gameName string
@@ -463,9 +536,36 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 	}
 
 	host := server.HasClient(game.Host())
-	log.Printf("%s joined %s at IP %s.", client.userName, game.Name(), host.remoteIp())
+	log.Printf("%s joined %s.", client.userName, game.Name())
 
-	client.SendPacket("GAME_CONNECT", host.remoteIp())
+	var ipv4, ipv6 string
+	ip := net.ParseIP(host.remoteIp())
+	if ip.To4() != nil {
+		ipv4 = host.remoteIp()
+		ipv6 = host.otherIp()
+	} else {
+		ipv4 = host.otherIp()
+		ipv6 = host.remoteIp()
+	}
+	if client.protocolVersion == 0 {
+		// Legacy client: Send the IPv4 address
+		client.SendPacket("GAME_CONNECT", ipv4)
+		// One of the two has to be IPv4, otherwise the client wouldn't come this
+		// far anyway (game would appear closed)
+	} else {
+		// Newer client which supports two IPs
+		// Only send him the IPs he can deal with
+		if client.hasV4 && client.hasV6 && host.otherIp() != "" {
+			// Both client and server have both IPs
+			client.SendPacket("GAME_CONNECT", ipv6, true, ipv4)
+		} else if client.hasV4 && len(ipv4) != 0 {
+			// Client and server have an IPv4 address
+			client.SendPacket("GAME_CONNECT", ipv4, false)
+		} else if client.hasV6 && len(ipv6) != 0 {
+			// Client and server have an IPv6 address
+			client.SendPacket("GAME_CONNECT", ipv6, false)
+		}
+	}
 	client.setGame(game, server)
 
 	return nil
@@ -526,7 +626,15 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError 
 		host := server.HasClient(game.Host())
 		data[n+0] = game.Name()
 		data[n+1] = host.buildId
-		data[n+2] = game.State() == CONNECTABLE
+		// A game is connectable when the client supports the IP version of the game
+		// (and the game is connectable itself, of course)
+		connectable := game.State() == CONNECTABLE_BOTH
+		if client.hasV4 && game.State() == CONNECTABLE_V4 {
+			connectable = true
+		} else if client.hasV6 && game.State() == CONNECTABLE_V6 {
+			connectable = true
+		}
+		data[n+2] = connectable
 		n += 3
 	})
 	client.SendPacket(data...)
