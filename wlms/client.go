@@ -555,13 +555,13 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 	} else {
 		// Newer client which supports two IPs
 		// Only send him the IPs he can deal with
-		if client.hasV4 && client.hasV6 && host.otherIp() != "" {
+		if client.hasV4 && client.hasV6 && game.State() == CONNECTABLE_BOTH {
 			// Both client and server have both IPs
 			client.SendPacket("GAME_CONNECT", ipv6, true, ipv4)
-		} else if client.hasV4 && len(ipv4) != 0 {
+		} else if client.hasV4 && game.State() == CONNECTABLE_V4 {
 			// Client and server have an IPv4 address
 			client.SendPacket("GAME_CONNECT", ipv4, false)
-		} else if client.hasV6 && len(ipv6) != 0 {
+		} else if client.hasV6 && game.State() == CONNECTABLE_V6 {
 			// Client and server have an IPv6 address
 			client.SendPacket("GAME_CONNECT", ipv6, false)
 		}
