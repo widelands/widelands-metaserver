@@ -1,7 +1,7 @@
 package main
 
 import (
-	. "launchpad.net/gocheck"
+	. "gopkg.in/check.v1"
 	"github.com/widelands_metaserver/wlms/packet"
 	"log"
 	"testing"
