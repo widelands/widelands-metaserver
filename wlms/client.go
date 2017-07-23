@@ -432,7 +432,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 	}
 
 	informationMatches :=
-		protocolVersion == client.protocolVersion &&
+		protocolVersion == oldClient.protocolVersion &&
 			buildId == oldClient.buildId
 
 	if isRegisteredOnServer {
