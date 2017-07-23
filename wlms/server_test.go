@@ -2,7 +2,7 @@ package main
 
 import (
 	. "launchpad.net/gocheck"
-	"launchpad.net/widelands-metaserver/wlms/packet"
+	"github.com/widelands_metaserver/wlms/packet"
 	"log"
 	"testing"
 	"time"

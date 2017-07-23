@@ -3,7 +3,7 @@ package main
 import (
 	"io"
 	. "launchpad.net/gocheck"
-	"launchpad.net/widelands-metaserver/wlms/packet"
+	"github.com/widelands_metaserver/wlms/packet"
 	"net"
 )
 
