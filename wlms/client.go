@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/widelands_metaserver/wlms/packet"
+	"github.com/widelands/widelands_metaserver/wlms/packet"
 	"log"
 	"net"
 	"reflect"

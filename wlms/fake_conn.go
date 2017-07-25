@@ -3,7 +3,7 @@ package main
 import (
 	"io"
 	. "gopkg.in/check.v1"
-	"github.com/widelands_metaserver/wlms/packet"
+	"github.com/widelands/widelands_metaserver/wlms/packet"
 	"net"
 )
 
