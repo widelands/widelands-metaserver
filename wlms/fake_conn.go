@@ -2,8 +2,8 @@ package main
 
 import (
 	"io"
-	. "launchpad.net/gocheck"
-	"launchpad.net/widelands-metaserver/wlms/packet"
+	. "gopkg.in/check.v1"
+	"github.com/widelands_metaserver/wlms/packet"
 	"net"
 )
 
