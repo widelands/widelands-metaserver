@@ -198,7 +198,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 
 			cmdName, err := pkg.ReadString()
 			if err != nil {
-				client.pendingRelogin.Disconnect(*server)
+				client.Disconnect(*server)
 				return
 			}
 
