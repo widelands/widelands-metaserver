@@ -20,4 +20,4 @@ in the Widelands sources at <https://launchpad.net/widelands>.
 2. scp `wlms` over to the server and replace `/usr/local/bin/wlms`.
 3. `sudo restart wlmetaserver`
 4. Check in `/var/log/upstart/wlmetaserver.log` that the restart was
-   successfull.
+   successful.
