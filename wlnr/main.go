@@ -1,6 +1,13 @@
-package wlnr
+package main
+
+import (
+	"log"
+//	"fmt"
+)
 
 func main() {
-	server := StartServer()
-	server.CreateGame("mygame", "pwd")
+	RunServer()
+	log.Printf("main1\n")
+//	log.Printf("Press Enter to exit\n")
+//	fmt.Scanln()
 }

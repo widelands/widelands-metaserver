@@ -1,24 +1,14 @@
-package wlnr
+package main
 
 import (
 	"container/list"
-	"io"
+//	"io"
 	"log"
 	"net"
 )
 
-type ReadWriteCloserWithIp interface {
-	io.ReadWriteCloser
-	RemoteAddr() net.Addr
-	SendPacket()
-}
-
-func SendPacket(conn ReadWriteCloserWithIp, data ...interface{}) {
-	conn.Write(packet.New(data...))
-}
-
 type Server struct {
-	acceptedConnections  chan ReadWriteCloserWithIp
+	acceptedConnections  chan net.Conn
 	shutdownServer       chan bool
 	serverHasShutdown    chan bool
 	games                *list.List
@@ -34,6 +24,7 @@ func (s *Server) WaitTillShutdown() {
 }
 
 func (s *Server) CreateGame(name, password string) {
+	log.Printf("creategame1\n")
 	game := NewGame(name, password)
 	s.games.PushBack(game)
 }
@@ -49,17 +40,21 @@ func (s *Server) RemoveGame(game *Game) {
 	log.Printf("Error: Did not find game '%s' to remove!", game.Name())
 }
 
-func StartServer() *Server {
+func RunServer() {
+	log.Printf("startserver1\n")
+	// Port is up to discussion. A dynamic portnumber could be used, too
 	ln, err := net.Listen("tcp", ":7397")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer ln.Close()
 
-	C := make(chan ReadWriteCloserWithIp)
+	C := make(chan net.Conn)
 	go func() {
 		for {
+	log.Printf("waiting for accept\n")
 			conn, err := ln.Accept()
+	log.Printf("accepted something\n")
 			if err != nil {
 				break
 			}
@@ -68,7 +63,7 @@ func StartServer() *Server {
 	}()
 
 	server := &Server{
-		acceptedConnections:    acceptedConnections,
+		acceptedConnections:    C,
 		shutdownServer:         make(chan bool),
 		serverHasShutdown:      make(chan bool),
 		games:                  list.New(),
@@ -76,21 +71,26 @@ func StartServer() *Server {
 
 	go server.mainLoop()
 
-	return server
+	log.Printf("startserver2\n")
+// NOCOM Remove next line and create a better channel
+server.CreateGame("mygame", "pwd")
+	server.WaitTillShutdown()
+	return
 }
 
 func (s *Server) mainLoop() {
 	for {
+	log.Printf("running mainloop\n")
 		select {
 		case conn, ok := <-s.acceptedConnections:
 			if !ok {
 				return
 			}
-			go s.dealWithNewConnection(conn)
+			go s.dealWithNewConnection(New(conn))
 		case <-s.shutdownServer:
 			for s.games.Len() > 0 {
 				e := s.games.Front()
-				e.Value.(*Game).Shutdown(*s)
+				e.Value.(*Game).Shutdown()
 				// Game removes itself
 			}
 			close(s.acceptedConnections)
@@ -100,20 +100,39 @@ func (s *Server) mainLoop() {
 	}
 }
 
-func (s *Server) dealWithNewConnection(conn ReadWriteCloserWithIp) {
+func (s *Server) dealWithNewConnection(client *Client) {
+
 	// TODO: Look into first packet and decide which game this is for
 	// TODO: pass connection to matching game.
-	name:="game name"
+	cmd, error := client.ReadUint8()
+	if error != nil || cmd != kHello {
+		client.Disconnect("PROTOCOL_VIOLATION")
+		return
+	}
+	version, error := client.ReadUint8()
+	if error != nil {
+		client.Disconnect("")
+		return
+	}
+	name, error := client.ReadString()
+	if error != nil {
+		client.Disconnect("PROTOCOL_VIOLATION")
+		return
+	}
+	password, error := client.ReadString()
+	if error != nil {
+		client.Disconnect("PROTOCOL_VIOLATION")
+		return
+	}
 	// The game will handle the client
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		game := e.Value.(*Game)
 		if game.Name() == name {
-			game.addClient(conn)
+			game.addClient(client, version, password)
 			return
 		}
 	}
 	// Matching game not found, close connection
-	conn.SendPacket("DISCONNECT", "GAME_UNKOWN")
-	conn.Close()
+	client.Disconnect("GAME_UNKNOWN")
 }
 
