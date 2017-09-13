@@ -83,7 +83,9 @@ func (s *Server) mainLoop() {
 	log.Printf("running mainloop\n")
 		select {
 		case conn, ok := <-s.acceptedConnections:
+			log.Printf("got acept in mainloop\n")
 			if !ok {
+				log.Printf("but is broken\n")
 				return
 			}
 			go s.dealWithNewConnection(New(conn))
@@ -101,37 +103,46 @@ func (s *Server) mainLoop() {
 }
 
 func (s *Server) dealWithNewConnection(client *Client) {
+log.Printf("deal with new connection\n")
 
-	// TODO: Look into first packet and decide which game this is for
-	// TODO: pass connection to matching game.
 	cmd, error := client.ReadUint8()
 	if error != nil || cmd != kHello {
+log.Printf("failed\n")
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
+log.Printf("got command: kHello\n")
 	version, error := client.ReadUint8()
 	if error != nil {
-		client.Disconnect("")
+log.Printf("failed\n")
+		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
+log.Printf("got version: %v\n", version)
 	name, error := client.ReadString()
 	if error != nil {
+log.Printf("failed\n")
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
+log.Printf("got name: %v\n", name)
 	password, error := client.ReadString()
 	if error != nil {
+log.Printf("failed\n")
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
+log.Printf("got password: %v\n", password)
 	// The game will handle the client
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		game := e.Value.(*Game)
 		if game.Name() == name {
+log.Printf("found game\n")
 			game.addClient(client, version, password)
 			return
 		}
 	}
+log.Printf("failed\n")
 	// Matching game not found, close connection
 	client.Disconnect("GAME_UNKNOWN")
 }

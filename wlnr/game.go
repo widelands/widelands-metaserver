@@ -93,7 +93,7 @@ func (game *Game) addClient(client *Client, version uint8, password string) {
 		game.host.id = ID_HOST
 		go game.handleHostMessages()
 // NOCOM(Notabilis): Detect loss of clients/host and quit game on host loss
-	/* Taken out for now. Might be needed in the future but it creates possible
+	/* Removed for now. Might be needed in the future but it leads to possible
 	   packet loss, so ignore it for now
 	} else if password == game.hostPassword {
 		// Seems like host reconnects, drop the old one
@@ -132,7 +132,9 @@ func (game *Game) getClient(id uint8) *Client {
 
 func (game *Game) DisconnectClient(client *Client, reason string) {
 	// NOCOM: Are the go routines terminated when disconnecting the client? Guess read*() returns an error then
-	if game.host == client {
+	if client == nil {
+		return
+	} else if game.host == client {
 		client.Disconnect(reason)
 		game.host = nil
 		return
@@ -144,6 +146,7 @@ func (game *Game) DisconnectClient(client *Client, reason string) {
 			}
 			client.Disconnect(reason)
 			game.clients.Remove(e)
+			break
 		}
 	}
 	//game.updateChannels()
@@ -187,7 +190,7 @@ func (game *Game) handleHostMessages() {
 		if err != nil {
 			game.DisconnectClient(game.host, "PROTOCOL_VIOLATION")
 			// Admittedly: Shutting down the relay is hard. But when the host is sending
-			// trash there is nothing we can do anyway
+			// trash or becomes disconnected there is nothing we can do anyway
 			game.Shutdown()
 			return
 		}

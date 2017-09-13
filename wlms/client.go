@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/widelands/widelands_metaserver/wlms/packet"
+	// NOCOM
+	//"github.com/widelands/widelands_metaserver/wlms/packet"
+	"github.com/widelands_metaserver/wlms/packet"
 	"log"
 	"net"
 	"reflect"
@@ -535,18 +537,21 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 		return CmdPacketError{"GAME_FULL"}
 	}
 
-	host := server.HasClient(game.Host())
 	log.Printf("%s joined %s.", client.userName, game.Name())
 
 	var ipv4, ipv6 string
-	ip := net.ParseIP(host.remoteIp())
+	// NOCOM(Notabilis): Make this the current IPv4/IPv6 of the metaserver
+	ipv4 = "10.0.0.1"
+	ipv6 = "2002:5843:f034::1"
+	//host := server.HasClient(game.Host())
+	/*ip := net.ParseIP(host.remoteIp())
 	if ip.To4() != nil {
 		ipv4 = host.remoteIp()
 		ipv6 = host.otherIp()
 	} else {
 		ipv4 = host.otherIp()
 		ipv6 = host.remoteIp()
-	}
+	}*/
 	if client.protocolVersion == 0 {
 		// Legacy client: Send the IPv4 address
 		client.SendPacket("GAME_CONNECT", ipv4)
@@ -555,13 +560,13 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 	} else {
 		// Newer client which supports two IPs
 		// Only send him the IPs he can deal with
-		if client.hasV4 && client.hasV6 && game.State() == CONNECTABLE_BOTH {
+		if client.hasV4 && client.hasV6 {
 			// Both client and server have both IPs
 			client.SendPacket("GAME_CONNECT", ipv6, true, ipv4)
-		} else if client.hasV4 && game.State() == CONNECTABLE_V4 {
+		} else if client.hasV4 {
 			// Client and server have an IPv4 address
 			client.SendPacket("GAME_CONNECT", ipv4, false)
-		} else if client.hasV6 && game.State() == CONNECTABLE_V6 {
+		} else if client.hasV6 {
 			// Client and server have an IPv6 address
 			client.SendPacket("GAME_CONNECT", ipv6, false)
 		}
@@ -628,13 +633,7 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError 
 		data[n+1] = host.buildId
 		// A game is connectable when the client supports the IP version of the game
 		// (and the game is connectable itself, of course)
-		connectable := game.State() == CONNECTABLE_BOTH
-		if client.hasV4 && game.State() == CONNECTABLE_V4 {
-			connectable = true
-		} else if client.hasV6 && game.State() == CONNECTABLE_V6 {
-			connectable = true
-		}
-		data[n+2] = connectable
+		data[n+2] = game.State() == CONNECTABLE
 		n += 3
 	})
 	client.SendPacket(data...)
