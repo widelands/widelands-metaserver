@@ -25,7 +25,7 @@ func (s *Server) WaitTillShutdown() {
 
 func (s *Server) CreateGame(name, password string) {
 	log.Printf("creategame1\n")
-	game := NewGame(name, password)
+	game := NewGame(name, password, s)
 	s.games.PushBack(game)
 }
 

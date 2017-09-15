@@ -2,9 +2,10 @@ package main
 
 import (
 	"container/list"
+	"io"
 //	"fmt"
 //	"github.com/widelands_metaserver/wlms/packet"
-//	"log"
+	"log"
 //	"net"
 //	"reflect"
 //	"strings"
@@ -52,17 +53,21 @@ type Game struct {
 	// The password which has to be presented by the host to make sure
 	// he really is the host 
 	hostPassword string
+
+	// A reference of the server since we have to tell him when we shut down
+	server *Server
 }
-func NewGame(name, password string) *Game {
+func NewGame(name, password string, server *Server) *Game {
 	game := &Game{
-		host:              nil,
-		clients:           list.New(),
-		nextClientId:      ID_HOST + 1,
+		host:				nil,
+		clients:			list.New(),
+		nextClientId:		ID_HOST + 1,
 		//channels:          nil,
 		//channelsToClients: nil,
-		protocolVersion:   VERSION_UNKNOWN,
-		gameName:          name,
-		hostPassword:      password,
+		protocolVersion:	VERSION_UNKNOWN,
+		gameName:			name,
+		hostPassword:		password,
+		server:				server,
 	}
 	//game.updateChannels()
 	//go game.mainLoop()
@@ -74,10 +79,12 @@ func (game *Game) Name() string {
 }
 
 func (game *Game) Shutdown() {
+	log.Printf("Shutting down game '%v'\n", game.gameName)
 	for game.clients.Len() > 0 {
 		game.DisconnectClient(game.clients.Front().Value.(*Client), "RELAY_SHUTDOWN")
 	}
 	game.DisconnectClient(game.host, "RELAY_SHUTDOWN")
+	game.server.RemoveGame(game)
 }
 
 
@@ -131,7 +138,6 @@ func (game *Game) getClient(id uint8) *Client {
 }
 
 func (game *Game) DisconnectClient(client *Client, reason string) {
-	// NOCOM: Are the go routines terminated when disconnecting the client? Guess read*() returns an error then
 	if client == nil {
 		return
 	} else if game.host == client {
@@ -156,7 +162,10 @@ func (game *Game) handleClientMessages(client *Client) {
 	for {
 		// Read for ever until an error occurres or we receive a disconnect
 		command, err := client.ReadUint8()
-		if err != nil {
+		if err == io.EOF {
+			game.DisconnectClient(client, "NORMAL")
+			return
+		} else if err != nil {
 			game.DisconnectClient(client, "PROTOCOL_VIOLATION")
 			return
 		}
@@ -188,7 +197,11 @@ func (game *Game) handleHostMessages() {
 		// Read for ever until an error occurres or we receive a disconnect
 		command, err := game.host.ReadUint8()
 		if err != nil {
-			game.DisconnectClient(game.host, "PROTOCOL_VIOLATION")
+			if err == io.EOF {
+				game.DisconnectClient(game.host, "NORMAL")
+			} else {
+				game.DisconnectClient(game.host, "PROTOCOL_VIOLATION")
+			}
 			// Admittedly: Shutting down the relay is hard. But when the host is sending
 			// trash or becomes disconnected there is nothing we can do anyway
 			game.Shutdown()
@@ -246,7 +259,7 @@ func (game *Game) handleHostMessages() {
 	}
 }
 
-
+// Rest is trash
 /*
 func (game *Game) updateChannels() {
 	game.channels = make([]reflect.SelectCase, game.clients.Len() + 1)
