@@ -5,6 +5,7 @@ import (
 //	"io"
 	"log"
 	"net"
+	"net/rpc"
 )
 
 type Server struct {
@@ -23,10 +24,19 @@ func (s *Server) WaitTillShutdown() {
 	<-s.serverHasShutdown
 }
 
-func (s *Server) CreateGame(name, password string) {
+func (s *Server) CreateGame(name, password string) bool {
 	log.Printf("creategame1\n")
+	// Check if the game already exists
+	for e := s.games.Front(); e != nil; e = e.Next() {
+		game := e.Value.(*Game)
+		if game.Name() == name {
+			return false
+		}
+	}
+	// It does not, add it
 	game := NewGame(name, password, s)
 	s.games.PushBack(game)
+	return true
 }
 
 func (s *Server) RemoveGame(game *Game) {
@@ -71,9 +81,17 @@ func RunServer() {
 
 	go server.mainLoop()
 
+	// Start rpc server so the metaserver can tell us about new games
+	rpc.Register(NewRelayRPC(server))
+	l, e := net.Listen("tcp", ":7398")
+	if e != nil {
+		log.Fatal("Unable to listen on rpc port: ", e)
+	}
+	rpc.Accept(l)
+
 	log.Printf("startserver2\n")
 // NOCOM Remove next line and create a better channel
-server.CreateGame("mygame", "pwd")
+//server.CreateGame("mygame", "pwd")
 	server.WaitTillShutdown()
 	return
 }

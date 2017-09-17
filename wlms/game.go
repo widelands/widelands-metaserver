@@ -14,11 +14,12 @@ const (
 
 type Game struct {
 	// The host is also listed in players.
-	host       string
-	players    map[string]bool
-	name       string
-	maxPlayers int
-	state      GameState
+	host         string
+	players      map[string]bool
+	name         string
+	maxPlayers   int
+	state        GameState
+	hostPassword string
 }
 
 type GamePinger struct {
@@ -33,6 +34,9 @@ func NewGame(host string, server *Server, gameName string, maxPlayers int) *Game
 		maxPlayers: maxPlayers,
 		state:      INITIAL_SETUP,
 	}
+
+	game.hostPassword = TODO: Learn this on first connect from the host
+
 	server.AddGame(game)
 
 	// NOCOM(Notabilis): Send this message when the relay confirms the connection
@@ -85,4 +89,8 @@ func (g *Game) RemovePlayer(userName string, server *Server) {
 
 func (g Game) NrPlayers() int {
 	return len(g.players)
+}
+
+func (g Game) HostPassword() string {
+	return g.hostPassword
 }
