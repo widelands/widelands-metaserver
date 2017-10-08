@@ -115,7 +115,7 @@ func (s *Server) RemoveClient(client *Client) {
 		}
 	}
 	if cnt > 1 {
-		log.Printf("Warning: %s is in the client list %i times.", client.Name(), cnt)
+		log.Printf("Warning: %s is in the client list %d times.", client.Name(), cnt)
 	}
 
 	// Now remove the client for good if it is around.
@@ -132,8 +132,10 @@ func (s *Server) RemoveClient(client *Client) {
 }
 
 func (s Server) HasClient(name string) *Client {
+	log.Printf("HasClient() searching for %v", name)
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		client := e.Value.(*Client)
+		log.Printf("HasClient() %v as %v", client.Name(), client.State())
 		if client.Name() == name {
 			return client
 		}

@@ -41,7 +41,10 @@ func main() {
 		ircbridge = NewIRCBridge(cfg.IRCServer, cfg.Realname, cfg.Nickname, cfg.Channel, cfg.UseTLS)
 	} else {
 		log.Println("No configuration found, using in-memory database")
-		db = NewInMemoryDb()
+		dbM := NewInMemoryDb()
+		db = dbM
+//Nocom: remove me
+dbM.AddUser("Notabilis", "n", REGISTERED)
 	}
 	defer db.Close()
 
