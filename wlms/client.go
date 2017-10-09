@@ -95,7 +95,7 @@ type Client struct {
 
 	// Variables for generating the username while searching for a free one
 	baseName string
-	// A value >0 indicates that we are currently searching for a free name.
+	// A value >=0 indicates that we are currently searching for a free name.
 	// This is different than a relogin after a short network problem
 	nameIndex int
 }
@@ -186,21 +186,28 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	}
 
 	for {
+		//log.Printf("for-loop of %s(%v)", client.userName, client.loginTime)
+
 		select {
 		case pkg, ok := <-client.dataStream:
 			if !ok {
+			log.Printf("Error on receival from %s(%v)", client.userName, client.loginTime)
+				client.failedPong(server)
 				client.Disconnect(*server)
 				return
 			}
+			//log.Printf("Received packet from %s(%v)", client.userName, client.loginTime)
 			client.waitingForPong = false
 			client.startToPingTimer.Reset(server.PingCycleTime())
 			client.timeoutTimer.Reset(server.ClientSendingTimeout())
 
 			if client.pendingLogin != nil {
-				if client.pendingLogin.nameIndex <= 0 {
+				if client.pendingLogin.nameIndex < 0 {
+					// legacy path
 					client.pendingLogin.SendPacket("ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
 					client.pendingLogin.Disconnect(*server)
 				} else {
+					log.Printf("Aborting check for %s, searching for new name", client.userName)
 					client.pendingLogin.findUnconnectedName(server)
 				}
 				client.pendingLogin = nil
@@ -234,27 +241,37 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			}
 
 		case <-client.timeoutTimer.C:
+			log.Printf("Timeout of %s", client.userName)
 			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 			client.Disconnect(*server)
 
 		case <-client.startToPingTimer.C:
+			//log.Printf("Ping-timer timeout for %s", client.userName)
 			if !client.waitingForPong {
 				client.restartPingLoop(server.PingCycleTime())
 			} else {
-				log.Printf("%s failed to PONG. Will disconnect.", client.Name())
-				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
-				client.Disconnect(*server)
-				if client.pendingLogin != nil {
-					if client.nameIndex <= 0 {
-						log.Printf("%s has successfully relogged in.", client.Name())
-						client.pendingLogin.successfulRelogin(server, client)
-					} else {
-						client.loginDone(server)
-					}
-				}
+				client.failedPong(server)
 			}
 		}
 	}
+}
+
+func (client *Client) failedPong(server *Server) {
+	log.Printf("%s failed to PONG. Will disconnect.", client.Name())
+	client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
+	client.Disconnect(*server)
+	if client.pendingLogin != nil {
+		if client.pendingLogin.nameIndex < 0 {
+			// legacy path
+			log.Printf("%s has successfully relogged in.", client.Name())
+			client.pendingLogin.successfulRelogin(server, client)
+		} else {
+			pending := client.pendingLogin
+			server.RemoveClient(client)
+			pending.loginDone(server)
+		}
+	}
+
 }
 
 func newClient(r ReadWriteCloserWithIp) *Client {
@@ -266,7 +283,7 @@ func newClient(r ReadWriteCloserWithIp) *Client {
 		startToPingTimer: time.NewTimer(time.Hour * 1),
 		timeoutTimer:     time.NewTimer(time.Hour * 1),
 		baseName:         "",
-		nameIndex:        0,
+		nameIndex:        -1,
 	}
 	return client
 }
@@ -281,13 +298,25 @@ func (client *Client) readingLoop(server Server) {
 		client.dataStream <- pkg
 	}
 }
-
+/*
+NOCOM: Nonce/UUID is broken
+On first connect, client name is t, nonce is h(t|c), assigned name becomes t1
+Crash
+User is intelligent, directly connects as t1, nonce is h(t1|c) != h(t|c), does not recognize old entry
+Boom.
+Case B: Client still uses name t but the name is free now: It will be used.
+Maybe: Search after the nonce and not after the name?
+*/
 func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
 	if client.state == CONNECTED {
+		//log.Printf("Pinging %s(%v) with %v seconds", client.userName, client.loginTime, pingCycleTime)
 		client.SendPacket("PING")
 		client.waitingForPong = true
 	}
 	client.startToPingTimer.Reset(pingCycleTime)
+	//log.Printf("Pinged %s(%v) with %v seconds", client.userName, client.loginTime, pingCycleTime)
+	//<-client.startToPingTimer.C
+	//log.Printf("Timeout")
 }
 
 func (client Client) remoteIp() string {
@@ -373,15 +402,21 @@ func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) CmdE
 }
 
 func (client *Client) Handle_PONG(server *Server, pkg *packet.Packet) CmdError {
+	// Nothing to do, is handled in the main receive loop
 	return nil
 }
 
 func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
+	log.Printf("HANDLE_LOGIN")
+
 	var isRegisteredOnServer bool
 	if err := pkg.Unpack(&c.protocolVersion, &c.userName, &c.buildId, &isRegisteredOnServer); err != nil {
 		return CriticalCmdPacketError{err.Error()}
 	}
+	c.baseName = c.userName
+	c.nameIndex = 0
 
+	// Check protocol version
 	if c.protocolVersion != 0 && c.protocolVersion != 2 {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
@@ -394,79 +429,52 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 		c.nonce = nonce
 	}
 
-	// TODO: Decide whether protocol version have to be increased at all
-	// TODO: Check if same code can be used for both versions
-	if c.protocolVersion < 2 {
-log.Printf("legacy %s trying to log in.", c.userName)
-		// legacy client
-		if isRegisteredOnServer {
-			if server.HasClient(c.userName) != nil {
-				return CriticalCmdPacketError{"ALREADY_LOGGED_IN"}
-			}
-			if !server.UserDb().ContainsName(c.userName) {
-				return CriticalCmdPacketError{"WRONG_PASSWORD"}
-			}
-			if !server.UserDb().PasswordCorrect(c.userName, c.nonce) {
-				return CriticalCmdPacketError{"WRONG_PASSWORD"}
-			}
-			c.permissions = server.UserDb().Permissions(c.userName)
-		} else {
-			baseName := c.userName
-			for i := 1; server.UserDb().ContainsName(c.userName) || server.HasClient(c.userName) != nil; i++ {
-				c.userName = fmt.Sprintf("%s%d", baseName, i)
-			}
+
+	// Check if registered. If it is, check credentials. If invalid, abort.
+	if isRegisteredOnServer {
+		if !server.UserDb().ContainsName(c.userName) {
+			return CriticalCmdPacketError{"WRONG_PASSWORD"}
 		}
-		c.loginTime = time.Now()
-		log.Printf("%s logged in.", c.userName)
+		if !server.UserDb().PasswordCorrect(c.userName, c.nonce) {
+			return CriticalCmdPacketError{"WRONG_PASSWORD"}
+		}
+		c.permissions = server.UserDb().Permissions(c.userName)
+	}
+	// Check if username already connected. If not, use username. Done.
+	oldClient := server.HasClient(c.userName)
+	if oldClient == nil {
+		return c.loginDone(server)
+	}
 
-		c.SendPacket("LOGIN", c.userName, c.permissions.String())
-		c.SendPacket("TIME", int(time.Now().Unix()))
-		server.AddClient(c)
-		c.setState(CONNECTED, *server)
-
-		if len(server.Motd()) != 0 {
-			c.SendPacket("CHAT", "", server.Motd(), "system")
+	// Search for free or inactive username
+	// Following steps are running asyncron and are started by the ping or the call to findUnconnectedName():
+	// While (username connected):
+	//   Check if nonce is the same. If not, continue
+	//   Send ping, generate new username. ASYNC
+	//     If no pong, replace user
+	//     If pong received, generate new username by appending number
+	if oldClient.pendingLogin == nil && oldClient.nonce == c.nonce {
+		log.Printf("not pending and same nonce: Checking if offline")
+		if oldClient.state == RECENTLY_DISCONNECTED {
+			// Already known as offline
+			log.Printf("already known as offline")
+			server.RemoveClient(oldClient)
+			c.loginDone(server)
+		} else {
+			// Start a fast ping and check whether the client is still active
+			oldClient.restartPingLoop(server.PingCycleTime() / 5)
+			oldClient.pendingLogin = c
 		}
 	} else {
-log.Printf("new %s trying to log in. nonce=%s", c.userName, c.nonce)
-		if isRegisteredOnServer {
-			if !server.UserDb().ContainsName(c.userName) {
-				return CriticalCmdPacketError{"WRONG_PASSWORD"}
-			}
-			if !server.UserDb().PasswordCorrect(c.userName, c.nonce) {
-				return CriticalCmdPacketError{"WRONG_PASSWORD"}
-			}
-			if server.HasClient(c.userName) != nil {
-				//return CriticalCmdPacketError{"ALREADY_LOGGED_IN"}
-				c.baseName = c.userName
-// Tests:
-// - unreg. Login, crash, login to same name
-// -  
-
-				c.nameIndex = 1
-				c.findUnconnectedName(server)
-			} else {
-				c.permissions = server.UserDb().Permissions(c.userName)
-				c.loginDone(server);
-			}
-		} else {
-			// NOCOM: HasClient must not be called here. We also need a ping!
-			if server.HasClient(c.userName) != nil || server.UserDb().ContainsName(c.userName) {
-				c.baseName = c.userName
-				c.nameIndex = 1
-				c.findUnconnectedName(server)
-			} else {
-				c.loginDone(server);
-			}
-
-		}
+		log.Printf("Other nonce, searching for new name")
+		c.findUnconnectedName(server)
 	}
-	return nil
+	return nil;
 }
 
 func (c *Client) loginDone(server *Server) CmdError {
 
-	c.nameIndex = 0
+	c.nameIndex = -1
 	c.loginTime = time.Now()
 	log.Printf("%s logged in.", c.userName)
 
@@ -478,36 +486,52 @@ func (c *Client) loginDone(server *Server) CmdError {
 	if len(server.Motd()) != 0 {
 		c.SendPacket("CHAT", "", server.Motd(), "system")
 	}
+	// NOCOM(Notabilis): @Reviewer: Use the next line? Remove it? Make it a constant and translate it on the client?
+	if c.baseName != c.userName {
+		c.SendPacket("CHAT", "", "Your desired username was already in use, another one has been generated for you", "system")
+	}
 	return nil
 
 }
 
 func (c *Client) findUnconnectedName(server *Server) {
+
+	// Drop permissions
+	c.permissions = UNREGISTERED
+
 	for {
-		c.userName = fmt.Sprintf("%s%d", c.baseName, c.nameIndex)
-log.Printf("Trying name %s", c.userName)
-		if !server.UserDb().ContainsName(c.userName) {
-			log.Printf("name not registered")
-			oldClient := server.HasClient(c.userName)
-			if oldClient == nil {
-				log.Printf("No old client")
-				// Found a free name
-				c.loginDone(server)
-				return
-			} else if oldClient.pendingLogin == nil && oldClient.nonce == c.nonce {
-				log.Printf("not pending and same nonce")
-				// Start a fast ping and check whether the client is still active
-				oldClient.restartPingLoop(server.PingCycleTime() / 3)
-				oldClient.pendingLogin = c
-				return
-			}
-			log.Printf("pending=%v, oldnonce=%s, newnonce=%s", oldClient.pendingLogin, oldClient.nonce, c.nonce)
-		}
+		// Generate new name
 		c.nameIndex++
+		c.userName = fmt.Sprintf("%s%d", c.baseName, c.nameIndex)
+
+log.Printf("Trying name %s", c.userName)
+
+		if server.UserDb().ContainsName(c.userName) {
+			continue
+		}
+
+		log.Printf("name not registered")
+		oldClient := server.HasClient(c.userName)
+		if oldClient == nil {
+			log.Printf("No old client")
+			// Found a free name
+			c.loginDone(server)
+			return
+		} else if oldClient.pendingLogin == nil && oldClient.nonce == c.nonce {
+			log.Printf("not pending and same nonce")
+			// Start a fast ping and check whether the client is still active
+			oldClient.restartPingLoop(server.PingCycleTime() / 5)
+			oldClient.pendingLogin = c
+			return
+		}
+		log.Printf("pending=%v, oldnonce=%s, newnonce=%s", oldClient.pendingLogin, oldClient.nonce, c.nonce)
 	}
 }
 
+// Only for legacy clients
 func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdError {
+	log.Printf("Handle_RELOGIN")
+
 	var isRegisteredOnServer bool
 	var protocolVersion int
 	var userName, buildId, nonce string
