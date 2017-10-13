@@ -132,10 +132,8 @@ func (s *Server) RemoveClient(client *Client) {
 }
 
 func (s Server) HasClient(name string) *Client {
-	log.Printf("HasClient() searching for %v", name)
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		client := e.Value.(*Client)
-		log.Printf("HasClient() %v as %v", client.Name(), client.State())
 		if client.Name() == name {
 			return client
 		}
@@ -151,7 +149,6 @@ func (s Server) FindClientsToReplace(nonce string, name string) []*Client {
 	// there may be multiple clients with the same nonce
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		client := e.Value.(*Client)
-		log.Printf("findClient() %v as %v", client.Name(), client.State())
 		if client.PendingLogin() != nil {
 			// If there already is a replacement pending for this client, there is no use adding
 			// it to this list. Either it will be replaced, or it is still active anyway

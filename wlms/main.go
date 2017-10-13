@@ -43,8 +43,6 @@ func main() {
 		log.Println("No configuration found, using in-memory database")
 		dbM := NewInMemoryDb()
 		db = dbM
-//Nocom: remove me
-dbM.AddUser("Notabilis", "n", REGISTERED)
 	}
 	defer db.Close()
 

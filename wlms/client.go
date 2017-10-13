@@ -92,7 +92,7 @@ type Client struct {
 	startToPingTimer *time.Timer
 	timeoutTimer     *time.Timer
 	waitingForPong   bool
-	pendingLogin   *Client
+	pendingLogin     *Client
 
 	// A value != nil indicates that we are currently searching for a free name.
 	// This is different than a relogin after a short network problem
@@ -197,9 +197,9 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 		case pkg, ok := <-client.dataStream:
 			if !ok {
 				if client.state != RECENTLY_DISCONNECTED {
-					// The receival failed due to a disconnect
 					client.failedPong(server)
 				}
+				// Else the receive failed due to a Disconnect() which is fine
 				return
 			}
 			client.waitingForPong = false
