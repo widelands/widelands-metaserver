@@ -1,7 +1,5 @@
 package main
 
-// NOCOM(Notabilis): Re-add ping&co since it is needed for the build19
-
 import (
 	"encoding/json"
 	"flag"

@@ -1,12 +1,10 @@
 package main
 
 import (
-	"github.com/widelands_metaserver/wlnr/rpc_data"
 	"container/list"
 	"io"
 	"log"
 	"net"
-	"net/rpc"
 	"time"
 )
 
@@ -27,7 +25,6 @@ type Server struct {
 	motd                 string
 	clientSendingTimeout time.Duration
 	pingCycleTime        time.Duration
-	relayConnection	     *rpc.Client
 
 	// Time in which a game has to respond to the first ping.
 	gameInitialPingTimeout time.Duration
@@ -165,17 +162,7 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 }
 
 func (s *Server) AddGame(game *Game) {
-	var ignored bool
-	var data rpc_data.NewGameData
-	data.Name = game.Name()
-	data.Password = game.HostPassword()
-	err := s.relayConnection.Call("RelayRPC.NewGame", data, &ignored)
-	if err != nil {
-		log.Fatal("Unable to open game %v", game.Name())
-		return
-	}
 	s.games.PushBack(game)
-	// TODO(Notabilis): This shouldn't be done until the relay confirms the connection
 	s.BroadcastToConnectedClients("GAMES_UPDATE")
 	s.BroadcastToIrc("A new game " + game.Name() + " was opened by " + game.Host())
 }
@@ -237,15 +224,6 @@ func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
 	}
 	defer ln.Close()
 
-	// NOCOM(Notabilis): Start the relay
-	// Try to connect to the relay
-	connection, err := net.DialTimeout("tcp", "127.0.0.1:7397", 10000)
-	if err != nil {
-		log.Fatal("Unable to connect to relay server. Aborting")
-		return
-	}
-	relay := rpc.NewClient(connection)
-
 	C := make(chan ReadWriteCloserWithIp)
 	go func() {
 		for {
@@ -256,7 +234,7 @@ func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
 			C <- conn
 		}
 	}()
-	CreateServerUsing(C, db, messagesIn, messagesOut, relay).WaitTillShutdown()
+	CreateServerUsing(C, db, messagesIn, messagesOut).WaitTillShutdown()
 }
 
 type RealGamePingerFactory struct {
@@ -298,7 +276,7 @@ func (server *Server) InjectGamePingerFactory(gpf GamePingerFactory) {
 	server.gamePingerFactory = gpf
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, messagesIn chan Message, messagesOut chan Message, relay *rpc.Client) *Server {
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, messagesIn chan Message, messagesOut chan Message) *Server {
 	server := &Server{
 		acceptedConnections:    acceptedConnections,
 		shutdownServer:         make(chan bool),
@@ -312,7 +290,6 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		clientSendingTimeout:   time.Minute * 2,
 		clientForgetTimeout:    time.Minute * 5,
 		messagesOut:            messagesOut,
-		relayConnection:        relay,
 	}
 	server.gamePingerFactory = RealGamePingerFactory{server}
 	go func() {
