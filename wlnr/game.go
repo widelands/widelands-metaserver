@@ -3,14 +3,8 @@ package main
 import (
 	"container/list"
 	"io"
-//	"fmt"
-//	"github.com/widelands_metaserver/wlms/packet"
 	"log"
-//	"net"
-//	"reflect"
-//	"strings"
-//	"strconv"
-//	"time"
+	"time"
 )
 
 // ID inside the Client structure which denotes the host
@@ -30,12 +24,6 @@ type Game struct {
 	// The id the next client will get assigned
 	nextClientId uint8
 
-	// A list of all TCP channels currently in use
-//	channels []reflect.SelectCase
-
-	// A kind of map to link the indices inside the slice to clients
-//	channelsToClients [](*Client)
-
 	// The protocol version used for communication. Set on connect of the host
 	// and has to be the same for all clients.
 	// Being able to support different versions per client might be nice
@@ -47,7 +35,6 @@ type Game struct {
 
 	// Name of the game. Used to make sure clients connect to the right
 	// game. This is guaranteed to be unique by the metaserver.
-	// NOCOM(Notabilis): Make sure it really is guaranteed
 	gameName string
 
 	// The password which has to be presented by the host to make sure
@@ -56,21 +43,54 @@ type Game struct {
 
 	// A reference of the server since we have to tell him when we shut down
 	server *Server
+
+	// A timer checking for timeout of the game host
+	// On every message from the host it is reset. If it ever triggers,
+	// we probably lost the connection.
+	hostTimeout *time.Timer
+
+	// Whether we are currently shutting down
+	shutdown bool
+
+	// Whether we are waiting for a Pong. Gives the host
+	// a bit more time before we consider it lost.
+	waitForPong bool
 }
+
 func NewGame(name, password string, server *Server) *Game {
 	game := &Game{
-		host:				nil,
-		clients:			list.New(),
-		nextClientId:		ID_HOST + 1,
-		//channels:          nil,
-		//channelsToClients: nil,
-		protocolVersion:	VERSION_UNKNOWN,
-		gameName:			name,
-		hostPassword:		password,
-		server:				server,
+		host:            nil,
+		clients:         list.New(),
+		nextClientId:    ID_HOST + 1,
+		protocolVersion: VERSION_UNKNOWN,
+		gameName:        name,
+		hostPassword:    password,
+		server:          server,
+		// 25 seconds since the GameHost uses a ping interval of 20 seconds anyway
+		hostTimeout:     time.NewTimer(time.Second * 25),
+		shutdown:        false,
+		waitForPong:     false,
 	}
-	//game.updateChannels()
-	//go game.mainLoop()
+	go func() {
+		for {
+			<-game.hostTimeout.C
+			if game.host == nil {
+				// Seems the game is over
+				break
+			}
+			if game.waitForPong == false {
+				// Give the host a chance to react to a ping
+				game.waitForPong = true
+				game.host.SendCommand(kPing)
+				game.hostTimeout.Reset(time.Second * 11)
+			} else {
+				// Bad luck: Abort the game
+				log.Print("Timeout of host, aborting game ", game.gameName)
+				game.Shutdown()
+				break
+			}
+		}
+	}()
 	return game
 }
 
@@ -79,6 +99,10 @@ func (game *Game) Name() string {
 }
 
 func (game *Game) Shutdown() {
+	if game.shutdown == true {
+		return
+	}
+	game.shutdown = true
 	log.Printf("Shutting down game '%v'\n", game.gameName)
 	for game.clients.Len() > 0 {
 		game.DisconnectClient(game.clients.Front().Value.(*Client), "RELAY_SHUTDOWN")
@@ -86,7 +110,6 @@ func (game *Game) Shutdown() {
 	game.DisconnectClient(game.host, "RELAY_SHUTDOWN")
 	game.server.RemoveGame(game)
 }
-
 
 func (game *Game) addClient(client *Client, version uint8, password string) {
 	if game.host == nil {
@@ -99,9 +122,11 @@ func (game *Game) addClient(client *Client, version uint8, password string) {
 		game.host = client
 		game.host.id = ID_HOST
 		go game.handleHostMessages()
-// NOCOM(Notabilis): Detect loss of clients/host and quit game on host loss
+		// Send message to metaserver
+		game.server.GameConnected(game.Name())
 	/* Removed for now. Might be needed in the future but it leads to possible
-	   packet loss, so ignore it for now
+	   packet loss, so ignore it for now. Not really thought through yet,
+	   will probably shutdown the game
 	} else if password == game.hostPassword {
 		// Seems like host reconnects, drop the old one
 		if game.protocolVersion != version {
@@ -125,7 +150,6 @@ func (game *Game) addClient(client *Client, version uint8, password string) {
 		game.host.SendCommand(kConnectClient, client.id)
 	}
 	client.SendCommand(kWelcome, game.protocolVersion, game.gameName)
-	//game.updateChannels()
 }
 
 func (game *Game) getClient(id uint8) *Client {
@@ -141,7 +165,7 @@ func (game *Game) DisconnectClient(client *Client, reason string) {
 	if client == nil {
 		return
 	} else if game.host == client {
-		client.Disconnect(reason)
+		game.host.Disconnect(reason)
 		game.host = nil
 		return
 	}
@@ -155,7 +179,6 @@ func (game *Game) DisconnectClient(client *Client, reason string) {
 			break
 		}
 	}
-	//game.updateChannels()
 }
 
 func (game *Game) handleClientMessages(client *Client) {
@@ -179,8 +202,9 @@ func (game *Game) handleClientMessages(client *Client) {
 			if client == nil {
 				game.DisconnectClient(game.host, "INVALID_ID")
 			}
-			// TODO(Notabilis): This line might be a problem when there is no host temporarily. Also, what
-			// if the old connection is replaced in the near future? We will probably lose packets this way. :/
+			// TODO(Notabilis): This line might be a problem when there is no host temporarily.
+			// Also, what if the old connection is replaced by a new host a few seconds later?
+			// We will probably lose packets this way. :/
 			game.host.SendCommand(kFromClient, client.id, packet)
 		case kDisconnect:
 			// Read but ignore the reason
@@ -207,6 +231,8 @@ func (game *Game) handleHostMessages() {
 			game.Shutdown()
 			return
 		}
+		game.hostTimeout.Reset(time.Second * 25)
+		game.waitForPong = false
 		switch command {
 		case kToClients:
 			var destinations []*Client
@@ -221,13 +247,11 @@ func (game *Game) handleHostMessages() {
 					break
 				}
 				client := game.getClient(id)
-				if client == nil {
-					game.DisconnectClient(game.host, "INVALID_CLIENT")
-					game.Shutdown()
-					return
-
+				if client != nil {
+					// Should always be the case but might not be due to
+					// network delays (host did not receive our message yet)
+					destinations = append(destinations, client)
 				}
-				destinations = append(destinations, client)
 			}
 			packet, err := game.host.ReadPacket()
 			if err != nil {
@@ -238,166 +262,16 @@ func (game *Game) handleHostMessages() {
 			for _, client := range destinations {
 				client.SendCommand(kFromHost, packet)
 			}
-		case kBroadcast:
-			packet, err := game.host.ReadPacket()
-			if err != nil {
-				game.DisconnectClient(game.host, "PROTOCOL_VIOLATION")
-				game.Shutdown()
-				return
-			}
-			for e := game.clients.Front(); e != nil; e = e.Next() {
-				e.Value.(*Client).SendCommand(kFromHost, packet)
-			}
 		case kDisconnect:
 			// Read but ignore
 			game.host.ReadString()
 			game.DisconnectClient(game.host, "NORMAL")
 			game.Shutdown()
 			return
+		case kPong:
+			// Aha.
+			// As in: No special handling, timer has been reset above
 		}
-
 	}
 }
 
-// Rest is trash
-/*
-func (game *Game) updateChannels() {
-	game.channels = make([]reflect.SelectCase, game.clients.Len() + 1)
-	game.channelsToClients = make([](*Client), game.clients.Len() + 1)
-	game.channels = append(game.channels, reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(game.host.dataStream),
-		})
-	game.channelsToClients = append(game.channelsToClients, game.host)
-	for e := game.clients.Front(); e != nil; e = e.Next() {
-		game.channels = append(game.channels, reflect.SelectCase{
-				Dir:  reflect.SelectRecv,
-				Chan: reflect.ValueOf(e.Value.(*Client).dataStream),
-			})
-		game.channelsToClients = append(game.channelsToClients, e.Value.(*Client))
-
-	}
-}
-
-func (game *Game) mainLoop() {
-	for len(game.channels) > 0 {
-		// Do a select over all our connections
-		index, value, ok := reflect.Select(game.channels)
-		// Get the Client object associated to the read channel
-		client := game.channelsToClients[index]
-
-		if !ok {
-// NOCOM Does it make sense using $index when $ok is false?
-			game.DisconnectClient(client, "PROTOCOL_VIOLATION")
-			continue
-		}
-/*
-		pkg := value.Interface().(*packet.Packet)
-		cmdCode, err := pkg.Read()
-		if err != nil {
-			game.DisconnectClient(client, "PROTOCOL_VIOLATION")
-			continue
-		}
-
-		// Find the handler function for this packet
-		handlerFunc1 := reflect.ValueOf(game).MethodByName(strings.Join([]string{"Handle_", COMMAND_CODES[cmdCode]}, ""))
-		if !handlerFunc1.IsValid() {
-			game.DisconnectClient(client, "PROTOCOL_VIOLATION")
-			continue
-		}
-
-		handlerFunc2 := handlerFunc1.Interface().(func(*packet.Packet))
-		// Call the handler
-		handlerFunc2(pkg)
-		*/
-/*	}
-}
-*/
-// Following code not reworked yet.
-// TODO Implement handlers
-
-/*
-
-1 : "HELLO", // We actually do not see this command inside this class since its handled by the server
-	 2 : "WELCOME",
-	 3 : "DISCONNECT",
-	 // Host <-> Relay
-	 11 : "CONNECT_CLIENT",
-	 12 : "DISCONNECT_CLIENT",
-	 13 : "TO_CLIENT",
-	 14 : "FROM_CLIENT",
-	 15 : "BROADCAST",
-	 // Client <-> Relay
-	 21 : "TO_HOST",
-	 22 : "FROM_HOST",
-
-*/
-/*
-func (game *Game) Handle_DISCONNECT(pkg *packet.Packet) {
-	
-}
-
-func (game *Game) Handle_DISCONNECT(server *Server, pkg *packet.Packet) CmdError {
-	var reason string
-	if err := pkg.Unpack(&reason); err != nil {
-		return CmdPacketError{err.Error()}
-	}
-	log.Printf("%s left. Reason: '%s'", client.Name(), reason)
-
-	client.setGame(nil, server)
-
-	client.Disconnect(*server)
-	server.RemoveClient(client)
-	return nil
-}
-
-func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
-	var isRegisteredOnServer bool
-	if err := pkg.Unpack(&c.protocolVersion, &c.userName, &c.buildId, &isRegisteredOnServer); err != nil {
-		return CriticalCmdPacketError{err.Error()}
-	}
-
-	if c.protocolVersion != 0 && c.protocolVersion != 1 {
-		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
-	}
-
-	if isRegisteredOnServer || c.protocolVersion == 1 {
-		nonce, err := pkg.ReadString()
-		if err != nil {
-			return CriticalCmdPacketError{err.Error()}
-		}
-		c.nonce = nonce
-	}
-
-	if isRegisteredOnServer {
-		if server.HasClient(c.userName) != nil {
-			return CriticalCmdPacketError{"ALREADY_LOGGED_IN"}
-		}
-		if !server.UserDb().ContainsName(c.userName) {
-			return CriticalCmdPacketError{"WRONG_PASSWORD"}
-		}
-		if !server.UserDb().PasswordCorrect(c.userName, c.nonce) {
-			return CriticalCmdPacketError{"WRONG_PASSWORD"}
-		}
-		c.permissions = server.UserDb().Permissions(c.userName)
-	} else {
-		baseName := c.userName
-		for i := 1; server.UserDb().ContainsName(c.userName) || server.HasClient(c.userName) != nil; i++ {
-			c.userName = fmt.Sprintf("%s%d", baseName, i)
-		}
-	}
-
-	c.loginTime = time.Now()
-	log.Printf("%s logged in.", c.userName)
-
-	c.SendPacket("LOGIN", c.userName, c.permissions.String())
-	c.SendPacket("TIME", int(time.Now().Unix()))
-	server.AddClient(c)
-	c.setState(CONNECTED, *server)
-
-	if len(server.Motd()) != 0 {
-		c.SendPacket("CHAT", "", server.Motd(), "system")
-	}
-	return nil
-}
-*/

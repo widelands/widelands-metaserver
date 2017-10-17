@@ -2,10 +2,11 @@ package main
 
 import (
 	"container/list"
-//	"io"
 	"log"
 	"net"
 	"net/rpc"
+	"time"
+	"github.com/widelands/widelands_metaserver/wlnr/rpc_data"
 )
 
 type Server struct {
@@ -13,6 +14,7 @@ type Server struct {
 	shutdownServer       chan bool
 	serverHasShutdown    chan bool
 	games                *list.List
+	wlms                 *rpc.Client
 }
 
 func (s *Server) InitiateShutdown() error {
@@ -25,7 +27,14 @@ func (s *Server) WaitTillShutdown() {
 }
 
 func (s *Server) CreateGame(name, password string) bool {
-	log.Printf("creategame1\n")
+	// The metaserver wants something from us. Try to connect to it, too
+	if s.wlms == nil {
+		connection, err := net.DialTimeout("tcp", "127.0.0.1:7399", time.Duration(10) * time.Second)
+		if err != nil {
+			return false
+		}
+		s.wlms = rpc.NewClient(connection)
+	}
 	// Check if the game already exists
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		game := e.Value.(*Game)
@@ -39,10 +48,22 @@ func (s *Server) CreateGame(name, password string) bool {
 	return true
 }
 
+func (s *Server) GameConnected(name string) {
+	// Tell the metaserver about it
+	var ignored bool
+	var data rpc_data.NewGameData
+	data.Name = name
+	s.wlms.Call("ServerRPC.GameConnected", data, &ignored)
+}
+
 func (s *Server) RemoveGame(game *Game) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Game) == game {
 			log.Printf("Removing game %s.", game.Name())
+			var ignored bool
+			var data rpc_data.NewGameData
+			data.Name = game.Name()
+			s.wlms.Call("ServerRPC.GameClosed", data, &ignored)
 			s.games.Remove(e)
 			return
 		}
@@ -51,8 +72,6 @@ func (s *Server) RemoveGame(game *Game) {
 }
 
 func RunServer() {
-	log.Printf("startserver1\n")
-	// Port is up to discussion. A dynamic portnumber could be used, too
 	ln, err := net.Listen("tcp", ":7397")
 	if err != nil {
 		log.Fatal(err)
@@ -62,9 +81,7 @@ func RunServer() {
 	C := make(chan net.Conn)
 	go func() {
 		for {
-	log.Printf("waiting for accept\n")
 			conn, err := ln.Accept()
-	log.Printf("accepted something\n")
 			if err != nil {
 				break
 			}
@@ -77,33 +94,30 @@ func RunServer() {
 		shutdownServer:         make(chan bool),
 		serverHasShutdown:      make(chan bool),
 		games:                  list.New(),
+		wlms:                   nil,
 	}
 
 	go server.mainLoop()
 
 	// Start rpc server so the metaserver can tell us about new games
+	log.Printf("Starting RPC server")
 	rpc.Register(NewRelayRPC(server))
 	l, e := net.Listen("tcp", ":7398")
 	if e != nil {
 		log.Fatal("Unable to listen on rpc port: ", e)
 	}
-	rpc.Accept(l)
+	defer l.Close()
+	go rpc.Accept(l)
 
-	log.Printf("startserver2\n")
-// NOCOM Remove next line and create a better channel
-//server.CreateGame("mygame", "pwd")
 	server.WaitTillShutdown()
 	return
 }
 
 func (s *Server) mainLoop() {
 	for {
-	log.Printf("running mainloop\n")
 		select {
 		case conn, ok := <-s.acceptedConnections:
-			log.Printf("got acept in mainloop\n")
 			if !ok {
-				log.Printf("but is broken\n")
 				return
 			}
 			go s.dealWithNewConnection(New(conn))
@@ -121,46 +135,34 @@ func (s *Server) mainLoop() {
 }
 
 func (s *Server) dealWithNewConnection(client *Client) {
-log.Printf("deal with new connection\n")
-
 	cmd, error := client.ReadUint8()
 	if error != nil || cmd != kHello {
-log.Printf("failed\n")
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
-log.Printf("got command: kHello\n")
 	version, error := client.ReadUint8()
 	if error != nil {
-log.Printf("failed\n")
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
-log.Printf("got version: %v\n", version)
 	name, error := client.ReadString()
 	if error != nil {
-log.Printf("failed\n")
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
-log.Printf("got name: %v\n", name)
 	password, error := client.ReadString()
 	if error != nil {
-log.Printf("failed\n")
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
-log.Printf("got password: %v\n", password)
 	// The game will handle the client
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		game := e.Value.(*Game)
 		if game.Name() == name {
-log.Printf("found game\n")
 			game.addClient(client, version, password)
 			return
 		}
 	}
-log.Printf("failed\n")
 	// Matching game not found, close connection
 	client.Disconnect("GAME_UNKNOWN")
 }

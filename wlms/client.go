@@ -515,7 +515,27 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 		return CmdPacketError{"GAME_EXISTS"}
 	}
 
-	client.setGame(NewGame(client.userName, server, gameName, maxPlayer), server)
+	if client.protocolVersion < 1 {
+		// Client does not support the relay server. Let him host his game
+		client.setGame(NewGame(client.userName, server, gameName, maxPlayer, false), server)
+	} else {
+		// Client does support the relay server. Start a game there
+		created := server.RelayCreateGame(gameName, client.nonce)
+		if !created {
+			// Not good. Should not happen
+			return CmdPacketError{"RELAY_ERROR"}
+		}
+		game := NewGame(client.userName, server, gameName, maxPlayer, true)
+		ipv4, ipv6 := server.GetRelayAddresses()
+		if client.hasV4 && client.hasV6 {
+			client.SendPacket("GAME_OPEN", ipv6, true, ipv4)
+		} else if client.hasV4 {
+			client.SendPacket("GAME_OPEN", ipv4, false)
+		} else if client.hasV6 {
+			client.SendPacket("GAME_OPEN", ipv6, false)
+		}
+		client.setGame(game, server)
+	}
 
 	log.Printf("%s hosts %s.", client.userName, gameName)
 	return nil
@@ -535,21 +555,32 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 		return CmdPacketError{"GAME_FULL"}
 	}
 
-	host := server.HasClient(game.Host())
 	log.Printf("%s joined %s.", client.userName, game.Name())
+	client.sendGameIPs("GAME_CONNECT", game, server)
+	client.setGame(game, server)
+	return nil
+}
+
+func (client *Client) sendGameIPs(message string, game *Game, server *Server) {
 
 	var ipv4, ipv6 string
-	ip := net.ParseIP(host.remoteIp())
-	if ip.To4() != nil {
-		ipv4 = host.remoteIp()
-		ipv6 = host.otherIp()
+	if game.UseRelay() {
+		// Game is using the relay
+		ipv4, ipv6 = server.GetRelayAddresses()
 	} else {
-		ipv4 = host.otherIp()
-		ipv6 = host.remoteIp()
+		host := server.HasClient(game.Host())
+		ip := net.ParseIP(host.remoteIp())
+		if ip.To4() != nil {
+			ipv4 = host.remoteIp()
+			ipv6 = host.otherIp()
+		} else {
+			ipv4 = host.otherIp()
+			ipv6 = host.remoteIp()
+		}
 	}
 	if client.protocolVersion == 0 {
 		// Legacy client: Send the IPv4 address
-		client.SendPacket("GAME_CONNECT", ipv4)
+		client.SendPacket(message, ipv4)
 		// One of the two has to be IPv4, otherwise the client wouldn't come this
 		// far anyway (game would appear closed)
 	} else {
@@ -557,18 +588,16 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 		// Only send him the IPs he can deal with
 		if client.hasV4 && client.hasV6 && game.State() == CONNECTABLE_BOTH {
 			// Both client and server have both IPs
-			client.SendPacket("GAME_CONNECT", ipv6, true, ipv4)
-		} else if client.hasV4 && game.State() == CONNECTABLE_V4 {
+			client.SendPacket(message, ipv6, true, ipv4)
+		} else if client.hasV4 && (game.State() == CONNECTABLE_V4 || game.State() == CONNECTABLE_BOTH) {
 			// Client and server have an IPv4 address
-			client.SendPacket("GAME_CONNECT", ipv4, false)
-		} else if client.hasV6 && game.State() == CONNECTABLE_V6 {
+			client.SendPacket(message, ipv4, false)
+		} else if client.hasV6 && (game.State() == CONNECTABLE_V6 || game.State() == CONNECTABLE_BOTH) {
 			// Client and server have an IPv6 address
-			client.SendPacket("GAME_CONNECT", ipv6, false)
+			client.SendPacket(message, ipv6, false)
+		} else {
 		}
 	}
-	client.setGame(game, server)
-
-	return nil
 }
 
 func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) CmdError {

@@ -2,7 +2,8 @@ package main
 
 import (
 	"errors"
-	"github.com/widelands_metaserver/wlnr/rpc_data"
+	"github.com/widelands/widelands_metaserver/wlnr/rpc_data"
+	"log"
 )
 
 type RelayRPC struct {
@@ -15,15 +16,13 @@ func NewRelayRPC(s *Server) *RelayRPC {
 	}
 }
 
-func (rpc *RelayRPC) NewGame(in *rpc_data.NewGameData, ignored *bool) error {
+func (rpc *RelayRPC) NewGame(in *rpc_data.NewGameData, success *bool) error {
 	ret := rpc.server.CreateGame(in.Name, in.Password)
 	if ret != true {
 		return errors.New("Game already exists")
 	}
+	*success = true
+	log.Printf("Starting new game named %v", in.Name)
 	return nil
 }
 
-func (rpc *RelayRPC) Shutdown( *bool, *bool) error {
-	rpc.server.InitiateShutdown()
-	return nil
-}
