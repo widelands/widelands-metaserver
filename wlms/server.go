@@ -347,7 +347,7 @@ func (server *Server) RelayCreateGame(name string, hostPassword string) bool {
 func (server *Server) RelayGameConnected(name string) {
 	game := server.HasGame(name)
 	if game == nil {
-		log.Print("ERROR: Relay server talks to us about unkown game ", name)
+		log.Printf("Relay server talks to us about unkown game %s, might already been closed", name)
 		return
 	}
 	game.SetState(*server, CONNECTABLE_BOTH)
