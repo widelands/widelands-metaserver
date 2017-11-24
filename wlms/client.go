@@ -504,7 +504,6 @@ func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdErro
 	return nil
 }
 
-
 func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdError {
 	var gameName string
 	var maxPlayer int
@@ -517,7 +516,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 
 	if client.protocolVersion < 1 {
 		// Client does not support the relay server. Let him host his game
-		client.setGame(NewGame(client.userName, server, gameName, maxPlayer, false), server)
+		client.setGame(NewGame(client.userName, server, gameName, maxPlayer, false /* do not use relay */), server)
 	} else {
 		// Client does support the relay server. Start a game there
 		created := server.RelayCreateGame(gameName, client.nonce)
@@ -525,7 +524,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 			// Not good. Should not happen
 			return CmdPacketError{"RELAY_ERROR"}
 		}
-		game := NewGame(client.userName, server, gameName, maxPlayer, true)
+		game := NewGame(client.userName, server, gameName, maxPlayer, true /* use relay */)
 		ipv4, ipv6 := server.GetRelayAddresses()
 		if client.hasV4 && client.hasV6 {
 			client.SendPacket("GAME_OPEN", ipv6, true, ipv4)
@@ -564,7 +563,7 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 func (client *Client) sendGameIPs(message string, game *Game, server *Server) {
 
 	var ipv4, ipv6 string
-	if game.UseRelay() {
+	if game.UsesRelay() {
 		// Game is using the relay
 		ipv4, ipv6 = server.GetRelayAddresses()
 	} else {

@@ -2,8 +2,8 @@ package main
 
 import (
 	"log"
-	"time"
 	"net"
+	"time"
 )
 
 type GameState int
@@ -24,7 +24,7 @@ type Game struct {
 	name       string
 	maxPlayers int
 	state      GameState
-	useRelay   bool
+	usesRelay  bool // True if all network traffic passes through our relay server.
 }
 
 type GamePinger struct {
@@ -140,18 +140,18 @@ func (game *Game) pingCycle(server *Server) {
 }
 
 // TODO(Notabilis): Remove all this useless maxPlayers stuff or find a use for it. Currently its always 1024.
-func NewGame(host string, server *Server, gameName string, maxPlayers int, useRelay bool) *Game {
+func NewGame(host string, server *Server, gameName string, maxPlayers int, shouldUseRelay bool) *Game {
 	game := &Game{
 		players:    make(map[string]bool),
 		host:       host,
 		name:       gameName,
 		maxPlayers: maxPlayers,
 		state:      INITIAL_SETUP,
-		useRelay:   useRelay,
+		usesRelay:  shouldUseRelay,
 	}
 	server.AddGame(game)
 
-	if !useRelay {
+	if !shouldUseRelay {
 		go game.pingCycle(server)
 	}
 	return game
@@ -200,6 +200,6 @@ func (g Game) NrPlayers() int {
 	return len(g.players)
 }
 
-func (g Game) UseRelay() bool {
-	return g.useRelay
+func (g Game) UsesRelay() bool {
+	return g.usesRelay
 }
