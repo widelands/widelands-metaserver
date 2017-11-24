@@ -1,9 +1,9 @@
 package main
 
 import (
-	"io"
-	. "gopkg.in/check.v1"
 	"github.com/widelands/widelands_metaserver/wlms/packet"
+	. "gopkg.in/check.v1"
+	"io"
 	"net"
 )
 

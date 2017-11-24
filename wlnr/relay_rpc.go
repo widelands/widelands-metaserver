@@ -25,4 +25,3 @@ func (rpc *RelayRPC) NewGame(in *rpc_data.NewGameData, success *bool) error {
 	log.Printf("Starting new game named %v", in.Name)
 	return nil
 }
-

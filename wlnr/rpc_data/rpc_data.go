@@ -1,8 +1,8 @@
 package rpc_data
 
 type NewGameData struct {
-	Name		string
-	Password	string
+	Name     string
+	Password string
 }
 
 /*
@@ -30,4 +30,3 @@ WLMS			WLNR			Client
 			<- DISCONNECT () ---------
 			*close game*
 */
-

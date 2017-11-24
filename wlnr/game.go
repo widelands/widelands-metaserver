@@ -38,7 +38,7 @@ type Game struct {
 	gameName string
 
 	// The password which has to be presented by the host to make sure
-	// he really is the host 
+	// he really is the host
 	hostPassword string
 
 	// A reference of the server since we have to tell him when we shut down
@@ -67,9 +67,9 @@ func NewGame(name, password string, server *Server) *Game {
 		hostPassword:    password,
 		server:          server,
 		// 25 seconds since the GameHost uses a ping interval of 20 seconds anyway
-		hostTimeout:     time.NewTimer(time.Second * 25),
-		shutdown:        false,
-		waitForPong:     false,
+		hostTimeout: time.NewTimer(time.Second * 25),
+		shutdown:    false,
+		waitForPong: false,
 	}
 	go func() {
 		for {
@@ -124,19 +124,19 @@ func (game *Game) addClient(client *Client, version uint8, password string) {
 		go game.handleHostMessages()
 		// Send message to metaserver
 		game.server.GameConnected(game.Name())
-	/* Removed for now. Might be needed in the future but it leads to possible
-	   packet loss, so ignore it for now. Not really thought through yet,
-	   will probably shutdown the game
-	} else if password == game.hostPassword {
-		// Seems like host reconnects, drop the old one
-		if game.protocolVersion != version {
-			client.Disconnect("WRONG_VERSION")
-			return
-		}
-		game.host.Disconnect("NORMAL")
-		game.host = client
-		game.host.id = ID_HOST
-		go game.handleHostMessages()*/
+		/* Removed for now. Might be needed in the future but it leads to possible
+		   packet loss, so ignore it for now. Not really thought through yet,
+		   will probably shutdown the game
+		} else if password == game.hostPassword {
+			// Seems like host reconnects, drop the old one
+			if game.protocolVersion != version {
+				client.Disconnect("WRONG_VERSION")
+				return
+			}
+			game.host.Disconnect("NORMAL")
+			game.host = client
+			game.host.id = ID_HOST
+			go game.handleHostMessages()*/
 	} else {
 		// A normal client
 		if game.protocolVersion != version {
@@ -274,4 +274,3 @@ func (game *Game) handleHostMessages() {
 		}
 	}
 }
-

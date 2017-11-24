@@ -27,10 +27,10 @@ type Client struct {
 
 func New(c net.Conn) *Client {
 	return &Client{
-		conn: c,
-		id: 0,
+		conn:   c,
+		id:     0,
 		reader: bufio.NewReader(c),
-		}
+	}
 }
 
 func (c *Client) ReadUint8() (uint8, error) {
@@ -54,7 +54,7 @@ func (c *Client) ReadPacket() ([]byte, error) {
 	if error != nil {
 		return length_bytes, error
 	}
-	length := int(length_bytes[0]) << 8 | int(length_bytes[1])
+	length := int(length_bytes[0])<<8 | int(length_bytes[1])
 	packet := make([]byte, length)
 	packet[0] = length_bytes[0]
 	packet[1] = length_bytes[1]
@@ -95,4 +95,3 @@ func (c *Client) Disconnect(reason string) {
 	c.SendCommand(kDisconnect, reason)
 	c.conn.Close()
 }
-
