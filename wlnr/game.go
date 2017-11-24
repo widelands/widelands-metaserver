@@ -50,7 +50,7 @@ type Game struct {
 	hostTimeout *time.Timer
 
 	// Whether we are currently shutting down
-	shutdown bool
+	currentlyShuttingDown bool
 
 	// Whether we are waiting for a Pong. Gives the host
 	// a bit more time before we consider it lost.
@@ -67,9 +67,9 @@ func NewGame(name, password string, server *Server) *Game {
 		hostPassword:    password,
 		server:          server,
 		// 25 seconds since the GameHost uses a ping interval of 20 seconds anyway
-		hostTimeout: time.NewTimer(time.Second * 25),
-		shutdown:    false,
-		waitForPong: false,
+		hostTimeout:           time.NewTimer(time.Second * 25),
+		currentlyShuttingDown: false,
+		waitForPong:           false,
 	}
 	go func() {
 		for {
@@ -99,10 +99,10 @@ func (game *Game) Name() string {
 }
 
 func (game *Game) Shutdown() {
-	if game.shutdown == true {
+	if game.currentlyShuttingDown == true {
 		return
 	}
-	game.shutdown = true
+	game.currentlyShuttingDown = true
 	log.Printf("Shutting down game '%v'\n", game.gameName)
 	for game.clients.Len() > 0 {
 		game.DisconnectClient(game.clients.Front().Value.(*Client), "RELAY_SHUTDOWN")
