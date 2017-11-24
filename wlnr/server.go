@@ -2,19 +2,19 @@ package main
 
 import (
 	"container/list"
+	"github.com/widelands/widelands_metaserver/wlnr/rpc_data"
 	"log"
 	"net"
 	"net/rpc"
 	"time"
-	"github.com/widelands/widelands_metaserver/wlnr/rpc_data"
 )
 
 type Server struct {
-	acceptedConnections  chan net.Conn
-	shutdownServer       chan bool
-	serverHasShutdown    chan bool
-	games                *list.List
-	wlms                 *rpc.Client
+	acceptedConnections chan net.Conn
+	shutdownServer      chan bool
+	serverHasShutdown   chan bool
+	games               *list.List
+	wlms                *rpc.Client
 }
 
 func (s *Server) InitiateShutdown() error {
@@ -29,7 +29,7 @@ func (s *Server) WaitTillShutdown() {
 func (s *Server) CreateGame(name, password string) bool {
 	// The metaserver wants something from us. Try to connect to it, too
 	if s.wlms == nil {
-		connection, err := net.DialTimeout("tcp", "127.0.0.1:7399", time.Duration(10) * time.Second)
+		connection, err := net.DialTimeout("tcp", "127.0.0.1:7399", time.Duration(10)*time.Second)
 		if err != nil {
 			return false
 		}
@@ -51,8 +51,9 @@ func (s *Server) CreateGame(name, password string) bool {
 func (s *Server) GameConnected(name string) {
 	// Tell the metaserver about it
 	var ignored bool
-	var data rpc_data.NewGameData
-	data.Name = name
+	data := rpc_data.NewGameData{
+		Name: name,
+	}
 	s.wlms.Call("ServerRPC.GameConnected", data, &ignored)
 }
 
@@ -61,8 +62,9 @@ func (s *Server) RemoveGame(game *Game) {
 		if e.Value.(*Game) == game {
 			log.Printf("Removing game %s.", game.Name())
 			var ignored bool
-			var data rpc_data.NewGameData
-			data.Name = game.Name()
+			data := rpc_data.NewGameData{
+				Name: game.Name(),
+			}
 			s.wlms.Call("ServerRPC.GameClosed", data, &ignored)
 			s.games.Remove(e)
 			return
@@ -90,11 +92,11 @@ func RunServer() {
 	}()
 
 	server := &Server{
-		acceptedConnections:    C,
-		shutdownServer:         make(chan bool),
-		serverHasShutdown:      make(chan bool),
-		games:                  list.New(),
-		wlms:                   nil,
+		acceptedConnections: C,
+		shutdownServer:      make(chan bool),
+		serverHasShutdown:   make(chan bool),
+		games:               list.New(),
+		wlms:                nil,
 	}
 
 	go server.mainLoop()
@@ -166,4 +168,3 @@ func (s *Server) dealWithNewConnection(client *Client) {
 	// Matching game not found, close connection
 	client.Disconnect("GAME_UNKNOWN")
 }
-

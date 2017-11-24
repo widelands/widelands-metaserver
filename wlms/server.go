@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/widelands/widelands_metaserver/wlnr/rpc_data"
 	"container/list"
+	"github.com/widelands/widelands_metaserver/wlnr/rpc_data"
 	"io"
 	"log"
 	"net"
@@ -243,6 +243,7 @@ func (rpc *ServerRPC) GameClosed(in *rpc_data.NewGameData, response *bool) (err 
 	rpc.server.RelayGameClosed(in.Name)
 	return nil
 }
+
 // End mini RPC class
 
 func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
@@ -253,7 +254,7 @@ func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
 	defer ln.Close()
 
 	// Open connection to relay server
-	connection, err := net.DialTimeout("tcp", "127.0.0.1:7398", time.Duration(10) * time.Second)
+	connection, err := net.DialTimeout("tcp", "127.0.0.1:7398", time.Duration(10)*time.Second)
 	if err != nil {
 		log.Fatal("Unable to connect to relay server: ", err)
 		return
@@ -332,9 +333,10 @@ func (server *Server) InjectGamePingerFactory(gpf GamePingerFactory) {
 func (server *Server) RelayCreateGame(name string, hostPassword string) bool {
 	// Tell relay to host game
 	var success bool
-	var data rpc_data.NewGameData
-	data.Name = name
-	data.Password = hostPassword
+	data := rpc_data.NewGameData{
+		Name:     name,
+		Password: hostPassword,
+	}
 	err := server.relay.Call("RelayRPC.NewGame", data, &success)
 	if err != nil || success == false {
 		log.Fatal("Unable to create a game on the relay server. This should not happen.")
