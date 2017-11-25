@@ -115,7 +115,7 @@ func (s *Server) RemoveClient(client *Client) {
 		}
 	}
 	if cnt > 1 {
-		log.Printf("Warning: %s is in the client list %i times.", client.Name(), cnt)
+		log.Printf("Warning: %s is in the client list %d times.", client.Name(), cnt)
 	}
 
 	// Now remove the client for good if it is around.
@@ -139,6 +139,43 @@ func (s Server) HasClient(name string) *Client {
 		}
 	}
 	return nil
+}
+
+func (s Server) FindClientsToReplace(nonce string, name string) []*Client {
+	res := make([]*Client, 0)
+	var best *Client = nil
+
+	// Assumptions: There is at most one client where nonce and name match,
+	// there may be multiple clients with the same nonce
+	for e := s.clients.Front(); e != nil; e = e.Next() {
+		client := e.Value.(*Client)
+		if client.PendingLogin() != nil {
+			// If there already is a replacement pending for this client, there is no use adding
+			// it to this list. Either it will be replaced, or it is still active anyway
+			continue
+		}
+		if client.Nonce() == nonce {
+			// Nonce is the same so at least it is one connection of this player
+			if client.Name() == name {
+				// Even the wanted name? Great! Add it to the front of the list later on
+				best = client
+			} else {
+				// Put disconnected clients on the front, (potentially) active ones in the back
+				// This way, disconnected clients will be replaced first
+				if client.State() == RECENTLY_DISCONNECTED {
+					res = append([]*Client{client}, res...)
+				} else {
+					res = append(res, client)
+				}
+			}
+		}
+	}
+
+	if best != nil {
+		// If we found a perfect match, push to front
+		res = append([]*Client{best}, res...)
+	}
+	return res
 }
 
 func (s Server) NrActiveClients() int {
