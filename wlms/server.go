@@ -339,7 +339,7 @@ func (server *Server) RelayCreateGame(name string, hostPassword string) bool {
 	}
 	err := server.relay.Call("RelayRPC.NewGame", data, &success)
 	if err != nil || success == false {
-		log.Fatal("Unable to create a game on the relay server. This should not happen.")
+		log.Println("ERROR: Unable to create a game on the relay server. This should not happen.")
 		return false
 	}
 	return true
