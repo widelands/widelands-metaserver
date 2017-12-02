@@ -525,13 +525,13 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 			return CmdPacketError{"RELAY_ERROR"}
 		}
 		game := NewGame(client.userName, server, gameName, maxPlayer, true /* use relay */)
-		ipv4, ipv6 := server.GetRelayAddresses()
+		ips := server.GetRelayAddresses()
 		if client.hasV4 && client.hasV6 {
-			client.SendPacket("GAME_OPEN", ipv6, true, ipv4)
+			client.SendPacket("GAME_OPEN", ips.ipv6, true, ips.ipv4)
 		} else if client.hasV4 {
-			client.SendPacket("GAME_OPEN", ipv4, false)
+			client.SendPacket("GAME_OPEN", ips.ipv4, false)
 		} else if client.hasV6 {
-			client.SendPacket("GAME_OPEN", ipv6, false)
+			client.SendPacket("GAME_OPEN", ips.ipv6, false)
 		}
 		client.setGame(game, server)
 	}
@@ -562,24 +562,24 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 
 func (client *Client) sendGameIPs(message string, game *Game, server *Server) {
 
-	var ipv4, ipv6 string
+	var ips AddressPair
 	if game.UsesRelay() {
 		// Game is using the relay
-		ipv4, ipv6 = server.GetRelayAddresses()
+		ips = server.GetRelayAddresses()
 	} else {
 		host := server.HasClient(game.Host())
 		ip := net.ParseIP(host.remoteIp())
 		if ip.To4() != nil {
-			ipv4 = host.remoteIp()
-			ipv6 = host.otherIp()
+			ips.ipv4 = host.remoteIp()
+			ips.ipv6 = host.otherIp()
 		} else {
-			ipv4 = host.otherIp()
-			ipv6 = host.remoteIp()
+			ips.ipv4 = host.otherIp()
+			ips.ipv6 = host.remoteIp()
 		}
 	}
 	if client.protocolVersion == 0 {
 		// Legacy client: Send the IPv4 address
-		client.SendPacket(message, ipv4)
+		client.SendPacket(message, ips.ipv4)
 		// One of the two has to be IPv4, otherwise the client wouldn't come this
 		// far anyway (game would appear closed)
 	} else {
@@ -587,13 +587,13 @@ func (client *Client) sendGameIPs(message string, game *Game, server *Server) {
 		// Only send him the IPs he can deal with
 		if client.hasV4 && client.hasV6 && game.State() == CONNECTABLE_BOTH {
 			// Both client and server have both IPs
-			client.SendPacket(message, ipv6, true, ipv4)
+			client.SendPacket(message, ips.ipv6, true, ips.ipv4)
 		} else if client.hasV4 && (game.State() == CONNECTABLE_V4 || game.State() == CONNECTABLE_BOTH) {
 			// Client and server have an IPv4 address
-			client.SendPacket(message, ipv4, false)
+			client.SendPacket(message, ips.ipv4, false)
 		} else if client.hasV6 && (game.State() == CONNECTABLE_V6 || game.State() == CONNECTABLE_BOTH) {
 			// Client and server have an IPv6 address
-			client.SendPacket(message, ipv6, false)
+			client.SendPacket(message, ips.ipv6, false)
 		} else {
 		}
 	}

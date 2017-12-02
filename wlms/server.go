@@ -38,8 +38,8 @@ type Server struct {
 	gamePingerFactory   GamePingerFactory
 	messagesOut         chan Message
 	relay               *rpc.Client
-	ipv4                string
-	ipv6                string
+	// The IP addresses of the wlnr instance
+	relay_address       AddressPair
 }
 
 type GamePingerFactory interface {
@@ -365,8 +365,8 @@ func (server *Server) RelayGameClosed(name string) {
 	server.RemoveGame(game)
 }
 
-func (server *Server) GetRelayAddresses() (string, string) {
-	return server.ipv4, server.ipv6
+func (server *Server) GetRelayAddresses() AddressPair {
+	return server.relay_address
 }
 
 func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, messagesIn chan Message, messagesOut chan Message, relay *rpc.Client) *Server {
@@ -384,8 +384,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		clientForgetTimeout:    time.Minute * 5,
 		messagesOut:            messagesOut,
 		relay:                  relay,
-		ipv4:                   "",
-		ipv6:                   "",
+		relay_address:          AddressPair{"", ""},
 	}
 	// Get the IP addresses of our domain
 	ips, err := net.LookupIP("widelands.org")
@@ -397,12 +396,12 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 	// Note: This program assumes that the server supports both IP versions
 	for _, ip := range ips {
 		if ip.To4() != nil {
-			server.ipv4 = ip.String()
+			server.relay_address.ipv4 = ip.String()
 			continue
 		}
-		server.ipv6 = ip.String()
+		server.relay_address.ipv6 = ip.String()
 	}
-	if server.ipv4 == "" || server.ipv6 == "" {
+	if server.relay_address.ipv4 == "" || server.relay_address.ipv6 == "" {
 		log.Fatal("Could not get an IPv4 and an IPv6 address for own host")
 		return nil
 	}
