@@ -20,8 +20,6 @@ type Client struct {
 	mutex sync.Mutex
 
 	// To read data from the network
-	// I don't really like having a reader using a connection which is also
-	// read from directly. But it seems to work
 	reader *bufio.Reader
 }
 
@@ -35,7 +33,7 @@ func New(c net.Conn) *Client {
 
 func (c *Client) ReadUint8() (uint8, error) {
 	b := make([]byte, 1)
-	_, error := io.ReadFull(c.conn, b)
+	_, error := io.ReadFull(c.reader, b)
 	return b[0], error
 }
 
@@ -50,7 +48,7 @@ func (c *Client) ReadString() (string, error) {
 
 func (c *Client) ReadPacket() ([]byte, error) {
 	length_bytes := make([]byte, 2)
-	_, error := io.ReadFull(c.conn, length_bytes)
+	_, error := io.ReadFull(c.reader, length_bytes)
 	if error != nil {
 		return length_bytes, error
 	}
@@ -58,7 +56,7 @@ func (c *Client) ReadPacket() ([]byte, error) {
 	packet := make([]byte, length)
 	packet[0] = length_bytes[0]
 	packet[1] = length_bytes[1]
-	_, error = io.ReadFull(c.conn, packet[2:])
+	_, error = io.ReadFull(c.reader, packet[2:])
 	// TODO(Notabilis): Think about this (and similar places). The client might be able
 	// to keep the server waiting here. Actually, he can simply keep the connection
 	// idling anyway. Is this a problem? Might be a possibility for DoS.

@@ -226,7 +226,7 @@ func (game *Game) handleHostMessages() {
 			} else {
 				game.DisconnectClient(game.host, "PROTOCOL_VIOLATION")
 			}
-			// Admittedly: Shutting down the relay is hard. But when the host is sending
+			// Admittedly: Shutting down the game is hard. But when the host is sending
 			// trash or becomes disconnected there is nothing we can do anyway
 			game.Shutdown()
 			return
