@@ -147,6 +147,11 @@ func (s *Server) dealWithNewConnection(client *Client) {
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
+	if version != 1 {
+		client.Disconnect("WRONG_VERSION")
+		return
+	}
+
 	name, error := client.ReadString()
 	if error != nil {
 		client.Disconnect("PROTOCOL_VIOLATION")

@@ -26,9 +26,6 @@ type Game struct {
 
 	// The protocol version used for communication. Set on connect of the host
 	// and has to be the same for all clients.
-	// Being able to support different versions per client might be nice
-	// but network games break with most commits anyway and the protocol
-	// version only seldom changes.
 	// This has to be specific for a game since there might be a newer
 	// version in trunk than in the latest release
 	protocolVersion uint8
