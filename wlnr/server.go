@@ -147,7 +147,7 @@ func (s *Server) dealWithNewConnection(client *Client) {
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
-	if version != 1 {
+	if version != kRelayProtocolVersion {
 		client.Disconnect("WRONG_VERSION")
 		return
 	}

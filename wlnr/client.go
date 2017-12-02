@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"sync"
 )
 
 // Structure to bundle the TCP connection with its packet buffer
@@ -16,19 +15,27 @@ type Client struct {
 	// The id of this client when refering to him in messages to the host
 	id uint8
 
-	// Mutex to avoid two Sends at the same time
-	mutex sync.Mutex
-
 	// To read data from the network
 	reader *bufio.Reader
+
+	// A channel for commands to send
+	chan_out chan *Command
 }
 
-func New(c net.Conn) *Client {
-	return &Client{
-		conn:   c,
-		id:     0,
-		reader: bufio.NewReader(c),
+func New(conn net.Conn) *Client {
+	client := &Client{
+		conn:     conn,
+		id:       0,
+		reader:   bufio.NewReader(conn),
+		chan_out: make(chan *Command),
 	}
+	go func() {
+		for {
+			cmd := <-client.chan_out
+			client.conn.Write(cmd.GetBytes())
+		}
+	}()
+	return client
 }
 
 func (c *Client) ReadUint8() (uint8, error) {
@@ -65,31 +72,15 @@ func (c *Client) ReadPacket() ([]byte, error) {
 	return packet, error
 }
 
-func (c *Client) SendCommand(rawData ...interface{}) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	for _, v := range rawData {
-		switch v.(type) {
-		case uint8:
-			b := make([]byte, 1)
-			b[0] = v.(uint8)
-			c.conn.Write(b)
-		case []byte:
-			c.conn.Write(v.([]byte))
-		case string:
-			c.conn.Write([]byte(v.(string)))
-			b := make([]byte, 1)
-			b[0] = 0 // '\0'
-			c.conn.Write(b)
-		default:
-			log.Fatal("Implementation error: Invalid data type in Client.SendCommand(), ignoring.")
-		}
-	}
+func (c *Client) SendCommand(cmd *Command) {
+	c.chan_out <- cmd
 }
 
 // Sends a disconnect message and closes the connection
 func (c *Client) Disconnect(reason string) {
 	log.Printf("Disconnecting client because %v\n", reason)
-	c.SendCommand(kDisconnect, reason)
+	cmd := NewCommand(kDisconnect)
+	cmd.AppendString(reason)
+	c.SendCommand(cmd)
 	c.conn.Close()
 }

@@ -78,7 +78,7 @@ func NewGame(name, password string, server *Server) *Game {
 			if game.waitForPong == false {
 				// Give the host a chance to react to a ping
 				game.waitForPong = true
-				game.host.SendCommand(kPing)
+				game.host.SendCommand(NewCommand(kPing))
 				game.hostTimeout.Reset(time.Second * 11)
 			} else {
 				// Bad luck: Abort the game
@@ -144,9 +144,14 @@ func (game *Game) addClient(client *Client, version uint8, password string) {
 		game.nextClientId = game.nextClientId + 1
 		game.clients.PushBack(client)
 		go game.handleClientMessages(client)
-		game.host.SendCommand(kConnectClient, client.id)
+		cmd := NewCommand(kConnectClient)
+		cmd.AppendUInt(client.id)
+		game.host.SendCommand(cmd)
 	}
-	client.SendCommand(kWelcome, game.protocolVersion, game.gameName)
+	cmd := NewCommand(kWelcome)
+	cmd.AppendUInt(game.protocolVersion)
+	cmd.AppendString(game.gameName)
+	client.SendCommand(cmd)
 }
 
 func (game *Game) getClient(id uint8) *Client {
@@ -169,7 +174,9 @@ func (game *Game) DisconnectClient(client *Client, reason string) {
 	for e := game.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client) == client {
 			if game.host != nil {
-				game.host.SendCommand(kDisconnectClient, client.id)
+				cmd := NewCommand(kDisconnectClient)
+				cmd.AppendUInt(client.id)
+				game.host.SendCommand(cmd)
 			}
 			client.Disconnect(reason)
 			game.clients.Remove(e)
@@ -202,7 +209,10 @@ func (game *Game) handleClientMessages(client *Client) {
 			// TODO(Notabilis): This line might be a problem when there is no host temporarily.
 			// Also, what if the old connection is replaced by a new host a few seconds later?
 			// We will probably lose packets this way. :/
-			game.host.SendCommand(kFromClient, client.id, packet)
+			cmd := NewCommand(kFromClient)
+			cmd.AppendUInt(client.id)
+			cmd.AppendBytes(packet)
+			game.host.SendCommand(cmd)
 		case kDisconnect:
 			// Read but ignore the reason
 			client.ReadString()
@@ -256,8 +266,10 @@ func (game *Game) handleHostMessages() {
 				game.Shutdown()
 				return
 			}
+			cmd := NewCommand(kFromHost)
+			cmd.AppendBytes(packet)
 			for _, client := range destinations {
-				client.SendCommand(kFromHost, packet)
+				client.SendCommand(cmd)
 			}
 		case kDisconnect:
 			// Read but ignore
