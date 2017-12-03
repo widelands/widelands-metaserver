@@ -14,6 +14,8 @@ kWelcome uint8 = 2
 kDisconnect uint8 = 3
 kPing uint8 = 4
 kPong uint8 = 5
+kRoundTripTimeRequest uint8 = 6
+kRoundTripTimeResponse uint8 = 7
 // host
 kConnectClient uint8 = 11
 kDisconnectClient uint8 = 12

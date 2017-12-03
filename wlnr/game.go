@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"io"
 	"log"
+	"math"
 	"time"
 )
 
@@ -41,17 +42,9 @@ type Game struct {
 	// A reference of the server since we have to tell him when we shut down
 	server *Server
 
-	// A timer checking for timeout of the game host
-	// On every message from the host it is reset. If it ever triggers,
-	// we probably lost the connection.
-	hostTimeout *time.Timer
-
 	// Whether we are currently shutting down
 	currentlyShuttingDown bool
 
-	// Whether we are waiting for a Pong. Gives the host
-	// a bit more time before we consider it lost.
-	waitForPong bool
 }
 
 func NewGame(name, password string, server *Server) *Game {
@@ -63,31 +56,8 @@ func NewGame(name, password string, server *Server) *Game {
 		gameName:        name,
 		hostPassword:    password,
 		server:          server,
-		// 25 seconds since the GameHost uses a ping interval of 20 seconds anyway
-		hostTimeout:           time.NewTimer(time.Second * 25),
 		currentlyShuttingDown: false,
-		waitForPong:           false,
 	}
-	go func() {
-		for {
-			<-game.hostTimeout.C
-			if game.host == nil {
-				// Seems the game is over
-				break
-			}
-			if game.waitForPong == false {
-				// Give the host a chance to react to a ping
-				game.waitForPong = true
-				game.host.SendCommand(NewCommand(kPing))
-				game.hostTimeout.Reset(time.Second * 11)
-			} else {
-				// Bad luck: Abort the game
-				log.Print("Timeout of host, aborting game ", game.gameName)
-				game.Shutdown()
-				break
-			}
-		}
-	}()
 	return game
 }
 
@@ -169,6 +139,9 @@ func (game *Game) DisconnectClient(client *Client, reason string) {
 	} else if game.host == client {
 		game.host.Disconnect(reason)
 		game.host = nil
+		// Admittedly: Shutting down the game is hard. But when the host is sending
+		// trash or becomes disconnected there is nothing we can do anyway
+		game.Shutdown()
 		return
 	}
 	for e := game.clients.Front(); e != nil; e = e.Next() {
@@ -185,6 +158,28 @@ func (game *Game) DisconnectClient(client *Client, reason string) {
 	}
 }
 
+func (game *Game) handlePong(client *Client) {
+	seq, err := client.ReadUint8()
+	if err != nil {
+		game.DisconnectClient(client, "PROTOCOL_VIOLATION")
+		return
+	}
+	client.HandlePong(seq)
+}
+
+func (game *Game) sendRTTs(client *Client) {
+	cmd := NewCommand(kRoundTripTimeResponse)
+	cmd.AppendUInt(uint8(game.clients.Len()))
+	for e := game.clients.Front(); e != nil; e = e.Next() {
+		client := e.Value.(*Client)
+		rtt_ms := client.RttLastPing().Nanoseconds() / 1000000
+		time_s := time.Since(client.TimeLastPong()).Seconds()
+		cmd.AppendUInt(client.id)
+		cmd.AppendUInt(uint8(math.Max(float64(rtt_ms), 255)))
+		cmd.AppendUInt(uint8(math.Max(time_s, 255)))
+	}
+	client.SendCommand(cmd)
+}
 func (game *Game) handleClientMessages(client *Client) {
 	for {
 		// Read for ever until an error occurres or we receive a disconnect
@@ -218,6 +213,10 @@ func (game *Game) handleClientMessages(client *Client) {
 			client.ReadString()
 			game.DisconnectClient(client, "NORMAL")
 			return
+		case kPong:
+			game.handlePong(client)
+		case kRoundTripTimeRequest:
+			game.sendRTTs(client)
 		}
 
 	}
@@ -233,13 +232,8 @@ func (game *Game) handleHostMessages() {
 			} else {
 				game.DisconnectClient(game.host, "PROTOCOL_VIOLATION")
 			}
-			// Admittedly: Shutting down the game is hard. But when the host is sending
-			// trash or becomes disconnected there is nothing we can do anyway
-			game.Shutdown()
 			return
 		}
-		game.hostTimeout.Reset(time.Second * 25)
-		game.waitForPong = false
 		switch command {
 		case kToClients:
 			var destinations []*Client
@@ -247,7 +241,6 @@ func (game *Game) handleHostMessages() {
 				id, err := game.host.ReadUint8()
 				if err != nil {
 					game.DisconnectClient(game.host, "PROTOCOL_VIOLATION")
-					game.Shutdown()
 					return
 				}
 				if id == 0 {
@@ -263,7 +256,6 @@ func (game *Game) handleHostMessages() {
 			packet, err := game.host.ReadPacket()
 			if err != nil {
 				game.DisconnectClient(game.host, "PROTOCOL_VIOLATION")
-				game.Shutdown()
 				return
 			}
 			cmd := NewCommand(kFromHost)
@@ -275,11 +267,11 @@ func (game *Game) handleHostMessages() {
 			// Read but ignore
 			game.host.ReadString()
 			game.DisconnectClient(game.host, "NORMAL")
-			game.Shutdown()
 			return
 		case kPong:
-			// Aha.
-			// As in: No special handling, timer has been reset above
+			game.handlePong(game.host)
+		case kRoundTripTimeRequest:
+			game.sendRTTs(game.host)
 		}
 	}
 }
