@@ -48,14 +48,13 @@ type Client struct {
 	// We always read one whole packet and send it over this to the consumer.
 	dataStream chan *packet.Packet
 
-	// the current connection state
+	// the current connection state.
 	state State
 
-	// the time when the user logged in for the first time. Relogins do not
-	// update this time.
+	// the time when the user logged in.
 	loginTime time.Time
 
-	// the protocol version used for communication
+	// the protocol version used for communication.
 	protocolVersion int
 
 	// is this a registered user/super user?
@@ -74,6 +73,8 @@ type Client struct {
 	// same game client connecting with another IP.
 	// This way, two connections by IPv4 and IPv6 can be matched so
 	// the server learns both addresses of the client.
+	// Another usage is to recognize a (re)connecting client and assign
+	// its old identity back to it.
 	nonce string
 
 	// the IP of the secondary connection.
@@ -91,7 +92,11 @@ type Client struct {
 	startToPingTimer *time.Timer
 	timeoutTimer     *time.Timer
 	waitingForPong   bool
-	pendingRelogin   *Client
+	pendingLogin     *Client
+
+	// A value != nil indicates that we are currently searching for a free name.
+	// This is different than a relogin after a short network problem
+	replaceCandidates []*Client
 }
 
 type CmdError interface{}
@@ -125,6 +130,14 @@ func (c *Client) setState(s State, server Server) {
 
 func (client Client) Name() string {
 	return client.userName
+}
+
+func (client Client) Nonce() string {
+	return client.nonce
+}
+
+func (client Client) PendingLogin() *Client {
+	return client.pendingLogin
 }
 
 func (client *Client) setGame(game *Game, server *Server) {
@@ -183,17 +196,25 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 		select {
 		case pkg, ok := <-client.dataStream:
 			if !ok {
-				client.Disconnect(*server)
+				if client.state != RECENTLY_DISCONNECTED {
+					client.failedPong(server)
+				}
+				// Else the receive failed due to a Disconnect() which is fine
 				return
 			}
 			client.waitingForPong = false
 			client.startToPingTimer.Reset(server.PingCycleTime())
 			client.timeoutTimer.Reset(server.ClientSendingTimeout())
 
-			if client.pendingRelogin != nil {
-				client.pendingRelogin.SendPacket("ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
-				client.pendingRelogin.Disconnect(*server)
-				client.pendingRelogin = nil
+			if client.pendingLogin != nil {
+				if client.pendingLogin.replaceCandidates == nil {
+					// legacy path
+					client.pendingLogin.SendPacket("ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
+					client.pendingLogin.Disconnect(*server)
+				} else {
+					client.pendingLogin.checkCandidates(server)
+				}
+				client.pendingLogin = nil
 			}
 
 			cmdName, err := pkg.ReadString()
@@ -224,6 +245,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			}
 
 		case <-client.timeoutTimer.C:
+			log.Printf("Timeout of %s", client.userName)
 			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 			client.Disconnect(*server)
 
@@ -231,26 +253,41 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			if !client.waitingForPong {
 				client.restartPingLoop(server.PingCycleTime())
 			} else {
-				log.Printf("%s failed to PONG. Will disconnect.", client.Name())
-				client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
-				client.Disconnect(*server)
-				if client.pendingRelogin != nil {
-					log.Printf("%s has successfully relogged in.", client.Name())
-					client.pendingRelogin.successfulRelogin(server, client)
-				}
+				client.failedPong(server)
 			}
 		}
 	}
 }
 
+func (client *Client) failedPong(server *Server) {
+	log.Printf("%s failed to PONG. Will disconnect.", client.Name())
+	client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
+	client.Disconnect(*server)
+	if client.pendingLogin != nil {
+		if client.pendingLogin.replaceCandidates == nil {
+			// legacy path
+			log.Printf("%s has successfully relogged in.", client.Name())
+			client.pendingLogin.successfulRelogin(server, client)
+		} else {
+			log.Printf("%s replaced old client with that name.", client.Name())
+			pending := client.pendingLogin
+			pending.userName = client.userName
+			server.RemoveClient(client)
+			pending.loginDone(server)
+		}
+	}
+
+}
+
 func newClient(r ReadWriteCloserWithIp) *Client {
 	client := &Client{
-		conn:             r,
-		dataStream:       make(chan *packet.Packet, 10),
-		state:            HANDSHAKE,
-		permissions:      UNREGISTERED,
-		startToPingTimer: time.NewTimer(time.Hour * 1),
-		timeoutTimer:     time.NewTimer(time.Hour * 1),
+		conn:              r,
+		dataStream:        make(chan *packet.Packet, 10),
+		state:             HANDSHAKE,
+		permissions:       UNREGISTERED,
+		startToPingTimer:  time.NewTimer(time.Hour * 1),
+		timeoutTimer:      time.NewTimer(time.Hour * 1),
+		replaceCandidates: nil,
 	}
 	return client
 }
@@ -357,6 +394,7 @@ func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) CmdE
 }
 
 func (client *Client) Handle_PONG(server *Server, pkg *packet.Packet) CmdError {
+	// Nothing to do, is handled in the main receive loop
 	return nil
 }
 
@@ -366,11 +404,12 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 		return CriticalCmdPacketError{err.Error()}
 	}
 
-	if c.protocolVersion != 0 && c.protocolVersion != 1 {
+	// Check protocol version
+	if c.protocolVersion != 0 && c.protocolVersion != 2 {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
 
-	if isRegisteredOnServer || c.protocolVersion == 1 {
+	if isRegisteredOnServer || c.protocolVersion == 2 {
 		nonce, err := pkg.ReadString()
 		if err != nil {
 			return CriticalCmdPacketError{err.Error()}
@@ -378,10 +417,8 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 		c.nonce = nonce
 	}
 
+	// Check if registered. If it is, check credentials. If invalid, abort.
 	if isRegisteredOnServer {
-		if server.HasClient(c.userName) != nil {
-			return CriticalCmdPacketError{"ALREADY_LOGGED_IN"}
-		}
 		if !server.UserDb().ContainsName(c.userName) {
 			return CriticalCmdPacketError{"WRONG_PASSWORD"}
 		}
@@ -389,12 +426,27 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 			return CriticalCmdPacketError{"WRONG_PASSWORD"}
 		}
 		c.permissions = server.UserDb().Permissions(c.userName)
-	} else {
-		baseName := c.userName
-		for i := 1; server.UserDb().ContainsName(c.userName) || server.HasClient(c.userName) != nil; i++ {
-			c.userName = fmt.Sprintf("%s%d", baseName, i)
-		}
 	}
+	// Check for clients which are using the same nonce
+	c.replaceCandidates = server.FindClientsToReplace(c.nonce, c.userName)
+	if len(c.replaceCandidates) == 0 {
+		// Noone connected with our nonce
+		// TODO(Notabilis): Maybe do the ContainsName() check here case-insensitive?
+		//                  Having "Peter" and "peter" is quite strange. Same for HasClient().
+		if server.HasClient(c.userName) == nil && (isRegisteredOnServer || !server.UserDb().ContainsName(c.userName)) {
+			// Name not in use
+			return c.loginDone(server)
+		}
+		// Name is in use or registered for someone else: Search for a free one
+		c.permissions = UNREGISTERED
+		c.findUnconnectedName(server)
+		return nil
+	}
+	c.checkCandidates(server)
+	return nil;
+}
+
+func (c *Client) loginDone(server *Server) CmdError {
 
 	c.loginTime = time.Now()
 	log.Printf("%s logged in.", c.userName)
@@ -407,9 +459,62 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 	if len(server.Motd()) != 0 {
 		c.SendPacket("CHAT", "", server.Motd(), "system")
 	}
+	c.replaceCandidates = nil
 	return nil
+
 }
 
+func (c *Client) checkCandidates(server *Server) {
+	if len(c.replaceCandidates) == 0 {
+		c.findUnconnectedName(server)
+		return
+	}
+	var oldClient *Client
+	oldClient, c.replaceCandidates = c.replaceCandidates[0], c.replaceCandidates[1:]
+	if oldClient.userName != c.userName {
+		// Other username: Drop permissions
+		c.permissions = UNREGISTERED
+	}
+	if oldClient.pendingLogin != nil {
+		// If there is a login pending, skip the old client
+		c.checkCandidates(server)
+		return
+	}
+	if oldClient.state == RECENTLY_DISCONNECTED {
+		// Already known as offline
+		c.userName = oldClient.userName
+		server.RemoveClient(oldClient)
+		c.loginDone(server)
+	} else {
+		// Start a fast ping and check whether the client is still active
+		oldClient.restartPingLoop(server.PingCycleTime() / 5)
+		oldClient.pendingLogin = c
+	}
+}
+
+func (c *Client) findUnconnectedName(server *Server) {
+	c.permissions = UNREGISTERED
+	nameIndex := 0
+	baseName := c.userName
+	for {
+		// Generate new name
+		nameIndex++
+		c.userName = fmt.Sprintf("%s%d", baseName, nameIndex)
+
+		if server.UserDb().ContainsName(c.userName) {
+			continue
+		}
+
+		oldClient := server.HasClient(c.userName)
+		if oldClient == nil {
+			// Found a free name
+			c.loginDone(server)
+			return
+		}
+	}
+}
+
+// Only for legacy clients
 func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdError {
 	var isRegisteredOnServer bool
 	var protocolVersion int
@@ -418,7 +523,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 		return CriticalCmdPacketError{err.Error()}
 	}
 
-	if isRegisteredOnServer || protocolVersion == 1 {
+	if isRegisteredOnServer || protocolVersion == 2 {
 		n, err := pkg.ReadString()
 		if err != nil {
 			return CriticalCmdPacketError{err.Error()}
@@ -433,15 +538,11 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 
 	informationMatches :=
 		protocolVersion == oldClient.protocolVersion &&
-			buildId == oldClient.buildId
+			buildId == oldClient.buildId &&
+			nonce == oldClient.nonce
 
-	if isRegisteredOnServer {
-		if oldClient.permissions == UNREGISTERED || !server.UserDb().PasswordCorrect(userName, nonce) {
-			informationMatches = false
-		}
-	} else if oldClient.permissions != UNREGISTERED {
-		informationMatches = false
-	}
+	// Don't check permissions since they might have been different from what the client requested.
+	// The current client understands the "permission downgrade" but I can't modify the old one.
 
 	if !informationMatches {
 		return CriticalCmdPacketError{"WRONG_INFORMATION"}
@@ -453,7 +554,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 	client.userName = oldClient.userName
 	client.buildId = oldClient.buildId
 	client.game = oldClient.game
-	client.nonce = nonce
+	client.nonce = oldClient.nonce
 
 	log.Printf("%s wants to reconnect.\n", client.Name())
 	if oldClient.state == RECENTLY_DISCONNECTED {
@@ -464,7 +565,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 		client.state = HANDSHAKE
 		// Force a quicker ping now, so that handshaking goes smoothly.
 		oldClient.restartPingLoop(server.PingCycleTime() / 3)
-		oldClient.pendingRelogin = client
+		oldClient.pendingLogin = client
 	}
 	return nil
 }
@@ -476,7 +577,7 @@ func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdErro
 		return CmdPacketError{err.Error()}
 	}
 
-	if protocolVersion != 1 {
+	if protocolVersion != 2 {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
 
