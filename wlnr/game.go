@@ -72,9 +72,9 @@ func (game *Game) Shutdown() {
 	game.currentlyShuttingDown = true
 	log.Printf("Shutting down game '%v'\n", game.gameName)
 	for game.clients.Len() > 0 {
-		game.DisconnectClient(game.clients.Front().Value.(*Client), "RELAY_SHUTDOWN")
+		game.DisconnectClient(game.clients.Front().Value.(*Client), "NORMAL")
 	}
-	game.DisconnectClient(game.host, "RELAY_SHUTDOWN")
+	game.DisconnectClient(game.host, "NORMAL")
 	game.server.RemoveGame(game)
 }
 
