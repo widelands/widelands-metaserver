@@ -91,19 +91,6 @@ func (game *Game) addClient(client *Client, version uint8, password string) {
 		go game.handleHostMessages()
 		// Send message to metaserver
 		game.server.GameConnected(game.Name())
-		/* Removed for now. Might be needed in the future but it leads to possible
-		   packet loss, so ignore it for now. Not really thought through yet,
-		   will probably shutdown the game
-		} else if password == game.hostPassword {
-			// Seems like host reconnects, drop the old one
-			if game.protocolVersion != version {
-				client.Disconnect("WRONG_VERSION")
-				return
-			}
-			game.host.Disconnect("NORMAL")
-			game.host = client
-			game.host.id = ID_HOST
-			go game.handleHostMessages()*/
 	} else {
 		// A normal client
 		if game.protocolVersion != version {
