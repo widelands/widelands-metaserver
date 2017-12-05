@@ -224,7 +224,11 @@ func (game *Game) handleClientMessages(client *Client) {
 
 func (game *Game) handleHostMessages() {
 	for {
-		// Read for ever until an error occurres or we receive a disconnect
+		// Read for ever until an error occurs or we receive a disconnect
+		if game.host == nil {
+			// host is nil: Disconnect induced by some other code
+			return
+		}
 		command, err := game.host.ReadUint8()
 		if err != nil {
 			if err == io.EOF {

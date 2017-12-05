@@ -67,6 +67,9 @@ func New(conn net.Conn) *Client {
 	go func() {
 		for {
 			cmd := <-client.chan_out
+			if client.conn == nil {
+				break;
+			}
 			client.conn.Write(cmd.GetBytes())
 		}
 	}()
