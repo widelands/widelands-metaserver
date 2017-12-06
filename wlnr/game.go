@@ -154,18 +154,37 @@ func (game *Game) handlePong(client *Client) {
 	client.HandlePong(seq)
 }
 
-func (game *Game) sendRTTs(client *Client) {
+func (game *Game) addClientRTT(cmd *Command, client *Client) {
+	rtt_ms := client.RttLastPing() / time.Millisecond
+	time_s := time.Since(client.TimeLastPong()).Seconds()
+	cmd.AppendUInt(client.id)
+	cmd.AppendUInt(uint8(math.Min(float64(rtt_ms), 255)))
+	cmd.AppendUInt(uint8(math.Min(time_s, 255)))
+}
+
+
+func (game *Game) sendRTTs(receiver *Client) {
 	cmd := NewCommand(kRoundTripTimeResponse)
-	cmd.AppendUInt(uint8(game.clients.Len()))
-	for e := game.clients.Front(); e != nil; e = e.Next() {
-		client := e.Value.(*Client)
-		rtt_ms := client.RttLastPing().Nanoseconds() / 1000000
-		time_s := time.Since(client.TimeLastPong()).Seconds()
-		cmd.AppendUInt(client.id)
-		cmd.AppendUInt(uint8(math.Max(float64(rtt_ms), 255)))
-		cmd.AppendUInt(uint8(math.Max(time_s, 255)))
+	// Count how many non-nil clients we have
+	client_count := 0
+	if game.host != nil {
+		client_count++
 	}
-	client.SendCommand(cmd)
+	for e := game.clients.Front(); e != nil; e = e.Next() {
+		if e.Value.(*Client) != nil {
+			client_count++
+		}
+	}
+	cmd.AppendUInt(uint8(client_count))
+	if game.host != nil {
+		game.addClientRTT(cmd, game.host)
+	}
+	for e := game.clients.Front(); e != nil; e = e.Next() {
+		if e.Value.(*Client) != nil {
+			game.addClientRTT(cmd, e.Value.(*Client))
+		}
+	}
+	receiver.SendCommand(cmd)
 }
 func (game *Game) handleClientMessages(client *Client) {
 	for {
