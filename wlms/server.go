@@ -2,9 +2,11 @@ package main
 
 import (
 	"container/list"
+	"github.com/widelands/widelands_metaserver/wlnr/rpc_data"
 	"io"
 	"log"
 	"net"
+	"net/rpc"
 	"time"
 )
 
@@ -35,6 +37,9 @@ type Server struct {
 	clientForgetTimeout time.Duration
 	gamePingerFactory   GamePingerFactory
 	messagesOut         chan Message
+	relay               *rpc.Client
+	// The IP addresses of the wlnr instance
+	relay_address AddressPair
 }
 
 type GamePingerFactory interface {
@@ -44,6 +49,7 @@ type GamePingerFactory interface {
 func (s Server) ClientSendingTimeout() time.Duration {
 	return s.clientSendingTimeout
 }
+
 func (s *Server) SetClientSendingTimeout(d time.Duration) {
 	s.clientSendingTimeout = d
 }
@@ -254,12 +260,51 @@ func (s Server) BroadcastToIrc(message string) {
 
 }
 
+// Mini class for RPC to receive messages
+type ServerRPC struct {
+	server *Server
+}
+
+func NewServerRPC(server *Server) *ServerRPC {
+	return &ServerRPC{
+		server: server,
+	}
+}
+
+func (rpc *ServerRPC) GameConnected(in *rpc_data.NewGameData, response *bool) (err error) {
+	rpc.server.RelayGameConnected(in.Name)
+	return nil
+}
+
+func (rpc *ServerRPC) GameClosed(in *rpc_data.NewGameData, response *bool) (err error) {
+	rpc.server.RelayGameClosed(in.Name)
+	return nil
+}
+
+// End mini RPC class
+
 func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
 	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer ln.Close()
+
+	// Open connection to relay server
+	connection, err := net.DialTimeout("tcp", "127.0.0.1:7398", time.Duration(10)*time.Second)
+	if err != nil {
+		log.Fatal("Unable to connect to relay server: ", err)
+		return
+	}
+	relay := rpc.NewClient(connection)
+
+	// Open our rpc server
+	rpcLn, err := net.Listen("tcp", ":7399")
+	if err != nil {
+		log.Fatal("Error when listening for RPC calls: ", err)
+		return
+	}
+	defer rpcLn.Close()
 
 	C := make(chan ReadWriteCloserWithIp)
 	go func() {
@@ -271,7 +316,14 @@ func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
 			C <- conn
 		}
 	}()
-	CreateServerUsing(C, db, messagesIn, messagesOut).WaitTillShutdown()
+
+	server := CreateServerUsing(C, db, messagesIn, messagesOut, relay)
+
+	// Run our rpc server
+	rpc.Register(NewServerRPC(server))
+	go rpc.Accept(rpcLn)
+
+	server.WaitTillShutdown()
 }
 
 type RealGamePingerFactory struct {
@@ -313,7 +365,48 @@ func (server *Server) InjectGamePingerFactory(gpf GamePingerFactory) {
 	server.gamePingerFactory = gpf
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, messagesIn chan Message, messagesOut chan Message) *Server {
+// Tells the relay server to start a game with the given name
+// The host position in the game is protected by the given password
+func (server *Server) RelayCreateGame(name string, hostPassword string) bool {
+	// Tell relay to host game
+	var success bool
+	data := rpc_data.NewGameData{
+		Name:     name,
+		Password: hostPassword,
+	}
+	err := server.relay.Call("RelayRPC.NewGame", data, &success)
+	if err != nil || success == false {
+		log.Println("ERROR: Unable to create a game on the relay server. This should not happen.")
+		return false
+	}
+	return true
+}
+
+// The relay informs us that the game with the given name has been connected by the host
+func (server *Server) RelayGameConnected(name string) {
+	game := server.HasGame(name)
+	if game == nil {
+		log.Printf("Relay server talks to us about unkown game %s, might already been closed", name)
+		return
+	}
+	game.SetState(*server, CONNECTABLE_BOTH)
+}
+
+// The relay informs us that the game with the given name has been closed
+func (server *Server) RelayGameClosed(name string) {
+	game := server.HasGame(name)
+	if game == nil {
+		log.Print("ERROR: Relay server talks to us about unkown game ", name)
+		return
+	}
+	server.RemoveGame(game)
+}
+
+func (server *Server) GetRelayAddresses() AddressPair {
+	return server.relay_address
+}
+
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, messagesIn chan Message, messagesOut chan Message, relay *rpc.Client) *Server {
 	server := &Server{
 		acceptedConnections:    acceptedConnections,
 		shutdownServer:         make(chan bool),
@@ -327,6 +420,30 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		clientSendingTimeout:   time.Minute * 2,
 		clientForgetTimeout:    time.Minute * 5,
 		messagesOut:            messagesOut,
+		relay:                  relay,
+		relay_address:          AddressPair{"", ""},
+	}
+	// Get the IP addresses of our domain
+	// TODO(sirver): This should be configurable for testing. For now you need
+	// to put 'localhost' here if you want to test Widelands locally against the
+	// metaserver + relay.
+	ips, err := net.LookupIP("localhost")
+	if err != nil {
+		log.Fatal("Failed to resolve own hostname")
+		return nil
+	}
+	// Select one IPv4 and one IPv6 address and store them
+	// Note: This program assumes that the server supports both IP versions
+	for _, ip := range ips {
+		if ip.To4() != nil {
+			server.relay_address.ipv4 = ip.String()
+			continue
+		}
+		server.relay_address.ipv6 = ip.String()
+	}
+	if server.relay_address.ipv4 == "" || server.relay_address.ipv6 == "" {
+		log.Fatal("Could not get an IPv4 and an IPv6 address for own host")
+		return nil
 	}
 	server.gamePingerFactory = RealGamePingerFactory{server}
 	go func() {

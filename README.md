@@ -10,21 +10,21 @@ in the Widelands sources at <https://launchpad.net/widelands>.
 
 1. Install [Go](https://golang.org/doc/install).
 2. `cd $GOPATH`
-3. `go get github.com/widelands/widelands_metaserver/wlms`
-4. `cd src/github.com/widelands/widelands_metaserver/wlms`
+3. `go get github.com/widelands/widelands_metaserver/...`
+4. `cd src/github.com/widelands/widelands_metaserver`
 5. `make`
 
 # Deploying
 
 1. `make cross`
-2. `scp wlms ssh://widelands.org:`. Then ssh into the machine and overwrite `/usr/local/bin/wlms` with the new binary.
+2. scp `$GOPATH/bin/linux_amd64/wl*` over to the server and replace the files in `/usr/local/bin/`.
 3. `sudo restart wlmetaserver`
 4. Check in `/var/log/upstart/wlmetaserver.log` that the restart was
    successful.
 
 # Testing locally
 
-1. `./wlms`. This starts the server with an empty in memory user database.
+1. `$GOPATH/bin/wlms`. This starts the server with an empty in memory user database.
 2. Edit `~/.widelands/config` and add the line `metaserver="127.0.0.1"` before
    launching widelands.
 3. Launch Widelands and click on internet game.
