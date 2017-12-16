@@ -443,7 +443,7 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 		return nil
 	}
 	c.checkCandidates(server)
-	return nil;
+	return nil
 }
 
 func (c *Client) loginDone(server *Server) CmdError {

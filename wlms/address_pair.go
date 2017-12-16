@@ -7,5 +7,3 @@ type AddressPair struct {
 	// An IPv6 address
 	ipv6 string
 }
-
-

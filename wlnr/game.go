@@ -44,18 +44,17 @@ type Game struct {
 
 	// Whether we are currently shutting down
 	currentlyShuttingDown bool
-
 }
 
 func NewGame(name, password string, server *Server) *Game {
 	game := &Game{
-		host:            nil,
-		clients:         list.New(),
-		nextClientId:    ID_HOST + 1,
-		protocolVersion: VERSION_UNKNOWN,
-		gameName:        name,
-		hostPassword:    password,
-		server:          server,
+		host:                  nil,
+		clients:               list.New(),
+		nextClientId:          ID_HOST + 1,
+		protocolVersion:       VERSION_UNKNOWN,
+		gameName:              name,
+		hostPassword:          password,
+		server:                server,
 		currentlyShuttingDown: false,
 	}
 	return game
@@ -161,7 +160,6 @@ func (game *Game) addClientRTT(cmd *Command, client *Client) {
 	cmd.AppendUInt(uint8(math.Min(float64(rtt_ms), 255)))
 	cmd.AppendUInt(uint8(math.Min(time_s, 255)))
 }
-
 
 func (game *Game) sendRTTs(receiver *Client) {
 	cmd := NewCommand(kRoundTripTimeResponse)

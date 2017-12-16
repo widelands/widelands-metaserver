@@ -24,7 +24,6 @@ type Client struct {
 	// A channel for commands to send
 	chan_out chan *Command
 
-
 	// A timer deciding when the next ping will be send
 	pingTimer *time.Timer
 
@@ -68,7 +67,7 @@ func New(conn net.Conn) *Client {
 		for {
 			cmd := <-client.chan_out
 			if client.conn == nil {
-				break;
+				break
 			}
 			client.conn.Write(cmd.GetBytes())
 		}
