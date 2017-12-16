@@ -39,7 +39,7 @@ type Server struct {
 	messagesOut         chan Message
 	relay               *rpc.Client
 	// The IP addresses of the wlnr instance
-	relay_address       AddressPair
+	relay_address AddressPair
 }
 
 type GamePingerFactory interface {
@@ -424,7 +424,10 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		relay_address:          AddressPair{"", ""},
 	}
 	// Get the IP addresses of our domain
-	ips, err := net.LookupIP("widelands.org")
+	// TODO(sirver): This should be configurable for testing. For now you need
+	// to put 'localhost' here if you want to test Widelands locally against the
+	// metaserver + relay.
+	ips, err := net.LookupIP("localhost")
 	if err != nil {
 		log.Fatal("Failed to resolve own hostname")
 		return nil
