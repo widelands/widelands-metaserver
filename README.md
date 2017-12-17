@@ -18,8 +18,9 @@ in the Widelands sources at <https://launchpad.net/widelands>.
 
 1. `make cross`
 2. scp `$GOPATH/bin/linux_amd64/wl*` over to the server and replace the files in `/usr/local/bin/`.
-3. `sudo restart wlmetaserver`
-4. Check in `/var/log/upstart/wlmetaserver.log` that the restart was
+3. `sudo restart wlnetrelay`. This will also restart the metaserver.
+4. Check in `/var/log/upstart/wlmetaserver.log` and
+   `/var/log/upstart/wlnetrelay.log` that the restarts were
    successful.
 
 # Testing locally
