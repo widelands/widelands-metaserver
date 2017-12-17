@@ -427,7 +427,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 	// TODO(sirver): This should be configurable for testing. For now you need
 	// to put 'localhost' here if you want to test Widelands locally against the
 	// metaserver + relay.
-	ips, err := net.LookupIP("localhost")
+	ips, err := net.LookupIP("widelands.org")
 	if err != nil {
 		log.Fatal("Failed to resolve own hostname")
 		return nil
