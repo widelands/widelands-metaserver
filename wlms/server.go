@@ -121,16 +121,16 @@ func (s *Server) RemoveClient(client *Client) {
 		}
 	}
 	if cnt > 1 {
-		log.Printf("Warning: %s is in the client list %d times.", client.Name(), cnt)
+		log.Printf("Warning: %s is in the client list %d times", client.Name(), cnt)
 	}
 
 	// Now remove the client for good if it is around.
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client) == client {
-			log.Printf("Removing client %s.", client.Name())
+			log.Printf("Removing client %s", client.Name())
 			s.clients.Remove(e)
 			s.messagesOut <- Message{
-				message: client.Name() + " has left the lobby.",
+				message: client.Name() + " has left the lobby",
 				nick:    client.Name(),
 			}
 		}
@@ -213,7 +213,7 @@ func (s *Server) AddGame(game *Game) {
 func (s *Server) RemoveGame(game *Game) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Game) == game {
-			log.Printf("Removing game %s.", game.Name())
+			log.Printf("Removing game '%s'", game.Name())
 			s.games.Remove(e)
 			s.BroadcastToConnectedClients("GAMES_UPDATE")
 		}
@@ -255,7 +255,7 @@ func (s Server) BroadcastToIrc(message string) {
 		message: message,
 	}:
 	default:
-		log.Println("Message Queue full.")
+		log.Println("Message Queue full")
 	}
 
 }
@@ -297,6 +297,7 @@ func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
 		return
 	}
 	relay := rpc.NewClient(connection)
+	log.Println("Connected to relay server")
 
 	// Open our rpc server
 	rpcLn, err := net.Listen("tcp", ":7399")
@@ -376,7 +377,7 @@ func (server *Server) RelayCreateGame(name string, hostPassword string) bool {
 	}
 	err := server.relay.Call("RelayRPC.NewGame", data, &success)
 	if err != nil || success == false {
-		log.Println("ERROR: Unable to create a game on the relay server. This should not happen.")
+		log.Println("ERROR: Unable to create a game on the relay server. This should not happen")
 		return false
 	}
 	return true
@@ -384,9 +385,10 @@ func (server *Server) RelayCreateGame(name string, hostPassword string) bool {
 
 // The relay informs us that the game with the given name has been connected by the host
 func (server *Server) RelayGameConnected(name string) {
+	log.Printf("Relay notifies us that the host connected to its game '%s'", name)
 	game := server.HasGame(name)
 	if game == nil {
-		log.Printf("Relay server talks to us about unkown game %s, might already been closed", name)
+		log.Printf(" Game '%s' is unknown, might already been closed", name)
 		return
 	}
 	game.SetState(*server, CONNECTABLE_BOTH)
@@ -394,9 +396,10 @@ func (server *Server) RelayGameConnected(name string) {
 
 // The relay informs us that the game with the given name has been closed
 func (server *Server) RelayGameClosed(name string) {
+	log.Printf("Relay notifies us that the game '%s' has been closed", name)
 	game := server.HasGame(name)
 	if game == nil {
-		log.Print("ERROR: Relay server talks to us about unkown game ", name)
+		// The game might have already been deleted when the host has notified us about its end
 		return
 	}
 	server.RemoveGame(game)

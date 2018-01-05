@@ -16,6 +16,7 @@ type Client struct {
 	conn net.Conn
 
 	// The id of this client when refering to him in messages to the host
+	// This id is only unique inside one game
 	id uint8
 
 	// To read data from the network
@@ -116,7 +117,7 @@ func (c *Client) SendCommand(cmd *Command) {
 
 // Sends a disconnect message and closes the connection
 func (c *Client) Disconnect(reason string) {
-	log.Printf("Disconnecting client because %v\n", reason)
+	log.Printf("Disconnecting client (id=%v) because %v\n", c.id, reason)
 	cmd := NewCommand(kDisconnect)
 	cmd.AppendString(reason)
 	c.SendCommand(cmd)
@@ -144,7 +145,7 @@ func (c *Client) pingLoop() {
 			// Bad luck: We got no response so disconnect client
 			// In the case of the game host this also takes down the game
 			// by closing the socket -> game will notice it and abort
-			log.Print("Timeout of client, disconnecting")
+			log.Printf("Timeout of client (id=%v), disconnecting", c.id)
 			c.Disconnect("TIMEOUT")
 			break
 		}

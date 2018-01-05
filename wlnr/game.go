@@ -90,6 +90,7 @@ func (game *Game) addClient(client *Client, version uint8, password string) {
 		go game.handleHostMessages()
 		// Send message to metaserver
 		game.server.GameConnected(game.Name())
+		log.Printf("Accepted new host (id=%v) with protocol version %v for game '%v'", ID_HOST, version, game.Name())
 	} else {
 		// A normal client
 		if game.protocolVersion != version {
@@ -109,6 +110,7 @@ func (game *Game) addClient(client *Client, version uint8, password string) {
 		cmd := NewCommand(kConnectClient)
 		cmd.AppendUInt(client.id)
 		game.host.SendCommand(cmd)
+		log.Printf("Accepted new client (id=%v) with protocol version %v for game '%v'", client.id, version, game.Name())
 	}
 	cmd := NewCommand(kWelcome)
 	cmd.AppendUInt(game.protocolVersion)

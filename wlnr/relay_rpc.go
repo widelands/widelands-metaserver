@@ -19,9 +19,9 @@ func NewRelayRPC(s *Server) *RelayRPC {
 func (rpc *RelayRPC) NewGame(in *rpc_data.NewGameData, success *bool) error {
 	ret := rpc.server.CreateGame(in.Name, in.Password)
 	if ret != true {
+		log.Printf("Error: Ordered to create game '%v', but it already exists", in.Name)
 		return errors.New("Game already exists")
 	}
 	*success = true
-	log.Printf("Starting new game named %v", in.Name)
 	return nil
 }
