@@ -17,7 +17,7 @@ const (
 	RUNNING
 )
 
-func (g GameState) ToString() string {
+func (g GameState) String() string {
 	switch g {
 	case INITIAL_SETUP:
 		return "INITIAL_SETUP"
@@ -32,7 +32,7 @@ func (g GameState) ToString() string {
 	case RUNNING:
 		return "RUNNING"
 	default:
-		log.Fatalf("Unknown game state: %v", g)
+		log.Fatalf("Unknown game state: %d", g)
 		return "UNKNOWN"
 	}
 }
@@ -186,7 +186,7 @@ func (g *Game) SetState(server Server, state GameState) {
 	if state != g.state {
 		g.state = state
 		server.BroadcastToConnectedClients("GAMES_UPDATE")
-		log.Printf("Game '%v' is now in state %v", g.Name(), g.state.ToString())
+		log.Printf("Game '%v' is now in state %v", g.Name(), g.state.String())
 	}
 }
 

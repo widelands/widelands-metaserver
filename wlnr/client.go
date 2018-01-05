@@ -145,7 +145,7 @@ func (c *Client) pingLoop() {
 			// Bad luck: We got no response so disconnect client
 			// In the case of the game host this also takes down the game
 			// by closing the socket -> game will notice it and abort
-			log.Print("Timeout of client (id=%v), disconnecting", c.id)
+			log.Printf("Timeout of client (id=%v), disconnecting", c.id)
 			c.Disconnect("TIMEOUT")
 			break
 		}

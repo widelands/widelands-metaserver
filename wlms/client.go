@@ -27,7 +27,7 @@ func (p Permissions) String() string {
 	case SUPERUSER:
 		return "SUPERUSER"
 	default:
-		log.Fatalf("Unknown Permissions: %v", p)
+		log.Fatalf("Unknown Permissions: %d", p)
 	}
 	// Never here
 	return ""

@@ -41,7 +41,7 @@ func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Messa
 	//Commands
 	err := bridge.connection.Connect(bridge.server) //Connect to server
 	if err != nil {
-		log.Fatal("Can't connect %s", bridge.server)
+		log.Fatalf("Can't connect %s", bridge.server)
 		return false
 	}
 	bridge.connection.AddCallback("001", func(e *irc.Event) { bridge.connection.Join(bridge.channel) })
