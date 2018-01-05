@@ -96,6 +96,12 @@ func (game *Game) addClient(client *Client, version uint8, password string) {
 			client.Disconnect("WRONG_VERSION")
 			return
 		}
+		if game.nextClientId >= 250 {
+			// Avoid overflow of uint8 id
+			log.Printf("Too many clients in game %v, disconnecting new client", game.Name())
+			client.Disconnect("NORMAL")
+			return
+		}
 		client.id = game.nextClientId
 		game.nextClientId = game.nextClientId + 1
 		game.clients.PushBack(client)
