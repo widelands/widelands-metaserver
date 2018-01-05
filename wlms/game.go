@@ -17,6 +17,26 @@ const (
 	RUNNING
 )
 
+func (g GameState) ToString() string {
+	switch g {
+	case INITIAL_SETUP:
+		return "INITIAL_SETUP"
+	case NOT_CONNECTABLE:
+		return "NOT_CONNECTABLE"
+	case CONNECTABLE_V4:
+		return "CONNECTABLE_V4"
+	case CONNECTABLE_V6:
+		return "CONNECTABLE_V6"
+	case CONNECTABLE_BOTH:
+		return "CONNECTABLE_BOTH"
+	case RUNNING:
+		return "RUNNING"
+	default:
+		log.Fatalf("Unknown game state: %v", g)
+		return "UNKNOWN"
+	}
+}
+
 type Game struct {
 	// The host is also listed in players.
 	host       string
@@ -42,7 +62,6 @@ func (game *Game) doPing(server *Server, host string, pingTimeout time.Duration)
 	}
 
 	if result {
-		log.Printf("Successfull ping reply from game %s.", game.Name())
 		switch game.state {
 		case INITIAL_SETUP:
 			game.SetState(*server, state_to_check)
@@ -62,7 +81,6 @@ func (game *Game) doPing(server *Server, host string, pingTimeout time.Duration)
 			log.Fatalf("Unhandled game.state: %v", game.state)
 		}
 	} else {
-		log.Printf("Failed ping reply from game %s.", game.Name())
 		switch game.state {
 		case INITIAL_SETUP:
 			game.SetState(*server, NOT_CONNECTABLE)
@@ -168,6 +186,7 @@ func (g *Game) SetState(server Server, state GameState) {
 	if state != g.state {
 		g.state = state
 		server.BroadcastToConnectedClients("GAMES_UPDATE")
+		log.Printf("Game '%v' is now in state %v", g.Name(), g.state.ToString())
 	}
 }
 
@@ -185,13 +204,13 @@ func (g *Game) AddPlayer(userName string) {
 
 func (g *Game) RemovePlayer(userName string, server *Server) {
 	if userName == g.host {
-		log.Printf("%s leaves game %s. This ends the game.", userName, g.name)
+		log.Printf("Host %v leaves game '%v'. This ends the game", userName, g.name)
 		server.RemoveGame(g)
 		return
 	}
 
 	if _, ok := g.players[userName]; ok {
-		log.Printf("%s leaves game %s.", userName, g.name)
+		log.Printf("Client %v leaves game '%v'", userName, g.name)
 		g.players[userName] = false
 	}
 }

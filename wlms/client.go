@@ -120,7 +120,7 @@ func (c *Client) setState(s State, server Server) {
 	case CONNECTED:
 		need_broadcast = c.state == HANDSHAKE || c.state == RECENTLY_DISCONNECTED
 	default:
-		log.Fatal("Unkown state in setState.")
+		log.Fatal("Unkown state in setState")
 	}
 	c.state = s
 	if need_broadcast {
@@ -146,8 +146,6 @@ func (client *Client) setGame(game *Game, server *Server) {
 	}
 
 	if client.game != nil {
-		game := client.game
-		log.Printf("%s left the game %s.", client.userName, game.Name())
 		client.game.RemovePlayer(client.Name(), server)
 		client.game = nil
 	}
@@ -232,20 +230,23 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			if pkgErr != nil {
 				switch pkgErr := pkgErr.(type) {
 				case CmdPacketError:
+					log.Printf("Error while handling command %v for client %v: %v", cmdName, client.Name(), pkgErr.What)
 					client.SendPacket("ERROR", cmdName, pkgErr.What)
 				case CriticalCmdPacketError:
+					log.Printf("Error while handling command %v for client %v: %v", cmdName, client.Name(), pkgErr.What)
 					client.SendPacket("ERROR", cmdName, pkgErr.What)
 					client.Disconnect(*server)
 				case InvalidPacketError:
+					log.Printf("Error while handling non-existing command %v from client %v", cmdName, client.Name())
 					client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 					client.Disconnect(*server)
 				default:
-					log.Fatal("Unknown error type returned by handler function.")
+					log.Fatal("Unknown error type returned by handler function")
 				}
 			}
 
 		case <-client.timeoutTimer.C:
-			log.Printf("Timeout of %s", client.userName)
+			log.Printf("Timeout of client %v", client.userName)
 			client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 			client.Disconnect(*server)
 
@@ -260,16 +261,16 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 }
 
 func (client *Client) failedPong(server *Server) {
-	log.Printf("%s failed to PONG. Will disconnect.", client.Name())
+	log.Printf("Client %v failed to PONG. Will disconnect", client.Name())
 	client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 	client.Disconnect(*server)
 	if client.pendingLogin != nil {
 		if client.pendingLogin.replaceCandidates == nil {
 			// legacy path
-			log.Printf("%s has successfully relogged in.", client.Name())
+			log.Printf("Client %v has successfully relogged in", client.Name())
 			client.pendingLogin.successfulRelogin(server, client)
 		} else {
-			log.Printf("%s replaced old client with that name.", client.Name())
+			log.Printf("Client %v replaced old client with that name", client.Name())
 			pending := client.pendingLogin
 			pending.userName = client.userName
 			server.RemoveClient(client)
@@ -314,7 +315,7 @@ func (client *Client) restartPingLoop(pingCycleTime time.Duration) {
 func (client Client) remoteIp() string {
 	host, _, err := net.SplitHostPort(client.conn.RemoteAddr().String())
 	if err != nil {
-		log.Fatalf("%s has no valid ip address.", client.userName)
+		log.Fatalf("Client %v has no valid ip address", client.userName)
 	}
 	return host
 }
@@ -384,7 +385,7 @@ func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) CmdE
 	if err := pkg.Unpack(&reason); err != nil {
 		return CmdPacketError{err.Error()}
 	}
-	log.Printf("%s left. Reason: '%s'", client.Name(), reason)
+	log.Printf("Client %v left. Reason: '%v'", client.Name(), reason)
 
 	client.setGame(nil, server)
 
@@ -449,7 +450,7 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 func (c *Client) loginDone(server *Server) CmdError {
 
 	c.loginTime = time.Now()
-	log.Printf("%s logged in.", c.userName)
+	log.Printf("Client %v logged in (game version %v, protocol version %v)", c.userName, c.buildId, c.protocolVersion)
 
 	c.SendPacket("LOGIN", c.userName, c.permissions.String())
 	c.SendPacket("TIME", int(time.Now().Unix()))
@@ -556,12 +557,12 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 	client.game = oldClient.game
 	client.nonce = oldClient.nonce
 
-	log.Printf("%s wants to reconnect.\n", client.Name())
+	log.Printf("Client %v wants to reconnect.\n", client.Name())
 	if oldClient.state == RECENTLY_DISCONNECTED {
-		log.Printf("Successfully immediately, because we had a recent disconnect.")
+		log.Printf(" Successfully immediately, because we had a recent disconnect")
 		client.successfulRelogin(server, oldClient)
 	} else {
-		log.Printf("Send to handshaking first.")
+		log.Printf(" Send to handshaking first")
 		client.state = HANDSHAKE
 		// Force a quicker ping now, so that handshaking goes smoothly.
 		oldClient.restartPingLoop(server.PingCycleTime() / 3)
@@ -583,7 +584,7 @@ func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdErro
 
 	old_client := server.HasClient(name)
 	if old_client == nil || old_client.userName != name || old_client.nonce != nonce {
-		log.Printf("Someone failed to register an IP for %s.", old_client.Name())
+		log.Printf("Someone failed to register an IP for client %v", old_client.Name())
 		return CriticalCmdPacketError{"NOT_LOGGED_IN"}
 	}
 
@@ -596,7 +597,7 @@ func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdErro
 	} else {
 		old_client.hasV6 = true
 	}
-	log.Printf("%s is now known to use %s and %s.", old_client.Name(), old_client.remoteIp(), old_client.otherIp())
+	log.Printf("Client %v is now known to use %v and %v", old_client.Name(), old_client.remoteIp(), old_client.otherIp())
 	client.Disconnect(*server)
 	// Tell the client to get a new list of games. The availability of games might have changed now that
 	// he supports more IP versions
@@ -617,9 +618,11 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 
 	if client.protocolVersion < 1 {
 		// Client does not support the relay server. Let him host his game
+		log.Printf("Starting new game '%v' on computer of host %v", gameName, client.Name())
 		client.setGame(NewGame(client.userName, server, gameName, maxPlayer, false /* do not use relay */), server)
 	} else {
 		// Client does support the relay server. Start a game there
+		log.Printf("Starting new game '%v' on relay for host %v", gameName, client.Name())
 		created := server.RelayCreateGame(gameName, client.nonce)
 		if !created {
 			// Not good. Should not happen
@@ -637,7 +640,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 		client.setGame(game, server)
 	}
 
-	log.Printf("%s hosts %s.", client.userName, gameName)
+	log.Printf("Client %v hosts game '%v'", client.userName, gameName)
 	return nil
 }
 
@@ -655,7 +658,7 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 		return CmdPacketError{"GAME_FULL"}
 	}
 
-	log.Printf("%s joined %s.", client.userName, game.Name())
+	log.Printf("Client %v joined game '%v'", client.userName, game.Name())
 	client.sendGameIPs("GAME_CONNECT", game, server)
 	client.setGame(game, server)
 	return nil
@@ -711,8 +714,6 @@ func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) CmdE
 
 	client.SendPacket("GAME_START")
 	client.game.SetState(*server, RUNNING)
-
-	log.Printf("%s has started.", client.game.Name())
 	return nil
 }
 

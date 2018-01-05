@@ -44,6 +44,7 @@ func (s *Server) CreateGame(name, password string) bool {
 	}
 	// It does not, add it
 	game := NewGame(name, password, s)
+	log.Printf("Created game '%v'", name)
 	s.games.PushBack(game)
 	return true
 }
@@ -60,7 +61,6 @@ func (s *Server) GameConnected(name string) {
 func (s *Server) RemoveGame(game *Game) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Game) == game {
-			log.Printf("Removing game %s.", game.Name())
 			var ignored bool
 			data := rpc_data.NewGameData{
 				Name: game.Name(),
@@ -70,7 +70,7 @@ func (s *Server) RemoveGame(game *Game) {
 			return
 		}
 	}
-	log.Printf("Error: Did not find game '%s' to remove!", game.Name())
+	log.Printf("Error: Did not find game '%v' to remove!", game.Name())
 }
 
 func RunServer() {
@@ -110,6 +110,8 @@ func RunServer() {
 	}
 	defer l.Close()
 	go rpc.Accept(l)
+
+	log.Println("The client ids are only unique within one game. Id=1 is host")
 
 	server.WaitTillShutdown()
 	return
