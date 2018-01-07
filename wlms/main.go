@@ -47,9 +47,11 @@ func main() {
 
 	messagesToIrc := make(chan Message, 50)
 	messagesToLobby := make(chan Message, 50)
+	ircClientsJoining := make(chan string, 50)
+	ircClientsQuitting := make(chan string, 50)
 	if ircbridge != nil {
-		ircbridge.Connect(messagesToIrc, messagesToLobby)
+		ircbridge.Connect(messagesToIrc, messagesToLobby, ircClientsJoining, ircClientsQuitting)
 	}
-	RunServer(db, messagesToLobby, messagesToIrc)
+	RunServer(db, messagesToLobby, messagesToIrc, ircClientsJoining, ircClientsQuitting)
 
 }

@@ -283,7 +283,7 @@ func (rpc *ServerRPC) GameClosed(in *rpc_data.NewGameData, response *bool) (err 
 
 // End mini RPC class
 
-func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
+func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message, ircClientsJoining chan string, ircClientsQuitting chan string) {
 	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {
 		log.Fatal(err)
@@ -318,7 +318,7 @@ func RunServer(db UserDb, messagesIn chan Message, messagesOut chan Message) {
 		}
 	}()
 
-	server := CreateServerUsing(C, db, messagesIn, messagesOut, relay)
+	server := CreateServerUsing(C, db, messagesIn, messagesOut, ircClientsJoining, ircClientsQuitting, relay)
 
 	// Run our rpc server
 	rpc.Register(NewServerRPC(server))
@@ -409,7 +409,7 @@ func (server *Server) GetRelayAddresses() AddressPair {
 	return server.relay_address
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, messagesIn chan Message, messagesOut chan Message, relay *rpc.Client) *Server {
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, messagesIn chan Message, messagesOut chan Message, ircClientsJoining chan string, ircClientsQuitting chan string, relay *rpc.Client) *Server {
 	server := &Server{
 		acceptedConnections:    acceptedConnections,
 		shutdownServer:         make(chan bool),
@@ -450,8 +450,22 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 	}
 	server.gamePingerFactory = RealGamePingerFactory{server}
 	go func() {
-		for m := range messagesIn {
-			server.BroadcastToConnectedClients("CHAT", m.nick+"(IRC)", m.message, "public")
+		for {
+			select {
+			case m := <-messagesIn:
+				server.BroadcastToConnectedClients("CHAT", m.nick, m.message, "public")
+			case nick := <-ircClientsJoining:
+				client := NewIRCClient(nick)
+				// Not using AddClient() since we don't want a broadcast to IRC here
+				server.clients.PushBack(client)
+				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+			case nick := <-ircClientsQuitting:
+				client := server.HasClient(nick)
+				if client != nil {
+					server.RemoveClient(client)
+					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+				}
+			}
 		}
 	}()
 	go server.mainLoop()

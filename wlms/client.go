@@ -163,7 +163,9 @@ func (client *Client) Disconnect(server Server) {
 }
 
 func (client *Client) SendPacket(data ...interface{}) {
-	client.conn.Write(packet.New(data...))
+	if client.conn != nil {
+		client.conn.Write(packet.New(data...))
+	}
 }
 
 func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
@@ -289,6 +291,17 @@ func newClient(r ReadWriteCloserWithIp) *Client {
 		startToPingTimer:  time.NewTimer(time.Hour * 1),
 		timeoutTimer:      time.NewTimer(time.Hour * 1),
 		replaceCandidates: nil,
+	}
+	return client
+}
+
+func NewIRCClient(nick string) *Client {
+	client := &Client{
+		state:       CONNECTED,
+		permissions: UNREGISTERED,
+		userName:    nick,
+		buildId:     "IRC",
+		nonce:       "irc",
 	}
 	return client
 }

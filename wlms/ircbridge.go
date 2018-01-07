@@ -2,12 +2,12 @@ package main
 
 import (
 	"log"
-
 	"github.com/thoj/go-ircevent"
+	"strings"
 )
 
 type IRCBridger interface {
-	Connect(chan Message, chan Message) bool
+	Connect(chan Message, chan Message, chan string, chan string) bool
 	Quit()
 }
 
@@ -31,7 +31,7 @@ func NewIRCBridge(server, realname, nickname, channel string, tls bool) *IRCBrid
 	}
 }
 
-func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Message) bool {
+func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Message, clientsJoin chan string, clientsQuit chan string) bool {
 	//Create new connection
 	bridge.connection = irc.IRC(bridge.nick, bridge.user)
 	//Set options
@@ -54,9 +54,40 @@ func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Messa
 			message: event.Message(),
 		}:
 		default:
-			log.Println("Message Queue full.")
+			log.Println("IRC Message Queue full.")
+		}
+	})
+	bridge.connection.AddCallback("JOIN", func(e *irc.Event) {
+		if e.Nick != bridge.nick {
+			select {
+			case clientsJoin <- e.Nick:
+			default:
+				log.Println("IRC Joining Queue full.")
+			}
 		}
 
+	})
+	bridge.connection.AddCallback("QUIT", func(e *irc.Event) {
+		if e.Nick != bridge.nick {
+			select {
+			case clientsQuit <- e.Nick:
+			default:
+				log.Println("IRC Quitting Queue full.")
+			}
+		}
+	})
+	// NAMREPLY: List of all nicknames in the channel. Send when we join
+	bridge.connection.AddCallback("353", func(e *irc.Event) {
+		nicks := strings.Fields(e.Message())
+		for _, nick := range nicks {
+			if nick != bridge.nick {
+				select {
+				case clientsJoin <- nick:
+				default:
+					log.Println("IRC Joining Queue full.")
+				}
+			}
+		}
 	})
 	go func() {
 		for m := range messagesIn {
