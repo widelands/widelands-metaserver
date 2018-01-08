@@ -45,13 +45,10 @@ func main() {
 	}
 	defer db.Close()
 
-	messagesToIrc := make(chan Message, 50)
-	messagesToLobby := make(chan Message, 50)
-	ircClientsJoining := make(chan string, 50)
-	ircClientsQuitting := make(chan string, 50)
+	channels := NewIRCBridgerChannels()
 	if ircbridge != nil {
-		ircbridge.Connect(messagesToIrc, messagesToLobby, ircClientsJoining, ircClientsQuitting)
+		ircbridge.Connect(channels)
 	}
-	RunServer(db, messagesToLobby, messagesToIrc, ircClientsJoining, ircClientsQuitting)
+	RunServer(db, channels)
 
 }

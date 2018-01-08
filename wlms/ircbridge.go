@@ -6,8 +6,24 @@ import (
 	"strings"
 )
 
+type IRCBridgerChannels struct {
+	messagesFromIRC  chan Message
+	messagesToIRC chan Message
+	clientsJoiningIRC chan string
+	clientsLeavingIRC chan string
+}
+
+func NewIRCBridgerChannels() *IRCBridgerChannels {
+	return &IRCBridgerChannels{
+		messagesFromIRC:   make(chan Message, 50),
+		messagesToIRC:     make(chan Message, 50),
+		clientsJoiningIRC: make(chan string, 50),
+		clientsLeavingIRC: make(chan string, 50),
+	}
+}
+
 type IRCBridger interface {
-	Connect(chan Message, chan Message, chan string, chan string) bool
+	Connect(*IRCBridgerChannels) bool
 	Quit()
 }
 
@@ -31,7 +47,7 @@ func NewIRCBridge(server, realname, nickname, channel string, tls bool) *IRCBrid
 	}
 }
 
-func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Message, clientsJoin chan string, clientsQuit chan string) bool {
+func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 	//Create new connection
 	bridge.connection = irc.IRC(bridge.nick, bridge.user)
 	//Set options
@@ -50,7 +66,7 @@ func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Messa
 		//e.Nick Contains the sender
 		//e.Arguments[0] Contains the channel
 		select {
-		case messagesOut <- Message{nick: event.Nick,
+		case channels.messagesFromIRC <- Message{nick: event.Nick,
 			message: event.Message(),
 		}:
 		default:
@@ -60,7 +76,7 @@ func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Messa
 	bridge.connection.AddCallback("JOIN", func(e *irc.Event) {
 		if e.Nick != bridge.nick {
 			select {
-			case clientsJoin <- e.Nick:
+			case channels.clientsJoiningIRC <- e.Nick:
 			default:
 				log.Println("IRC Joining Queue full.")
 			}
@@ -70,7 +86,7 @@ func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Messa
 	bridge.connection.AddCallback("QUIT", func(e *irc.Event) {
 		if e.Nick != bridge.nick {
 			select {
-			case clientsQuit <- e.Nick:
+			case channels.clientsLeavingIRC <- e.Nick:
 			default:
 				log.Println("IRC Quitting Queue full.")
 			}
@@ -82,7 +98,7 @@ func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Messa
 		for _, nick := range nicks {
 			if nick != bridge.nick {
 				select {
-				case clientsJoin <- nick:
+				case channels.clientsJoiningIRC <- nick:
 				default:
 					log.Println("IRC Joining Queue full.")
 				}
@@ -90,7 +106,7 @@ func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Messa
 		}
 	})
 	go func() {
-		for m := range messagesIn {
+		for m := range channels.messagesToIRC {
 			bridge.connection.Privmsg(bridge.channel, m.message)
 		}
 	}()
