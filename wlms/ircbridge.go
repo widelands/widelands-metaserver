@@ -74,34 +74,36 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 		}
 	})
 	bridge.connection.AddCallback("JOIN", func(e *irc.Event) {
-		if e.Nick != bridge.nick {
-			select {
-			case channels.clientsJoiningIRC <- e.Nick:
-			default:
-				log.Println("IRC Joining Queue full.")
-			}
+		if e.Nick == bridge.nick {
+			return
 		}
-
+		select {
+		case channels.clientsJoiningIRC <- e.Nick:
+		default:
+			log.Println("IRC Joining Queue full.")
+		}
 	})
 	bridge.connection.AddCallback("QUIT", func(e *irc.Event) {
-		if e.Nick != bridge.nick {
-			select {
-			case channels.clientsLeavingIRC <- e.Nick:
-			default:
-				log.Println("IRC Quitting Queue full.")
-			}
+		if e.Nick == bridge.nick {
+			return
+		}
+		select {
+		case channels.clientsLeavingIRC <- e.Nick:
+		default:
+			log.Println("IRC Quitting Queue full.")
 		}
 	})
 	// NAMREPLY: List of all nicknames in the channel. Send when we join
 	bridge.connection.AddCallback("353", func(e *irc.Event) {
 		nicks := strings.Fields(e.Message())
 		for _, nick := range nicks {
-			if nick != bridge.nick {
-				select {
-				case channels.clientsJoiningIRC <- nick:
-				default:
-					log.Println("IRC Joining Queue full.")
-				}
+			if nick == bridge.nick {
+				continue
+			}
+			select {
+			case channels.clientsJoiningIRC <- nick:
+			default:
+				log.Println("IRC Joining Queue full.")
 			}
 		}
 	})
