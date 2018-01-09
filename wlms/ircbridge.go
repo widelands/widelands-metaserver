@@ -6,10 +6,15 @@ import (
 	"strings"
 )
 
+// Structure with channels for communication between IRCBridger and the metaserver
 type IRCBridgerChannels struct {
+	// Messages sent by IRC users that should be displayed in the lobby
 	messagesFromIRC  chan Message
+	// Messages from players in the lobby that should be relayed to IRC
 	messagesToIRC chan Message
+	// Clients joining the IRC channel that should be added to the client list in the lobby
 	clientsJoiningIRC chan string
+	// Clients leaving the IRC channel
 	clientsLeavingIRC chan string
 }
 
