@@ -163,7 +163,9 @@ func (client *Client) Disconnect(server Server) {
 }
 
 func (client *Client) SendPacket(data ...interface{}) {
-	client.conn.Write(packet.New(data...))
+	if client.conn != nil {
+		client.conn.Write(packet.New(data...))
+	}
 }
 
 func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
@@ -289,6 +291,17 @@ func newClient(r ReadWriteCloserWithIp) *Client {
 		startToPingTimer:  time.NewTimer(time.Hour * 1),
 		timeoutTimer:      time.NewTimer(time.Hour * 1),
 		replaceCandidates: nil,
+	}
+	return client
+}
+
+func NewIRCClient(nick string) *Client {
+	client := &Client{
+		state:       CONNECTED,
+		permissions: UNREGISTERED,
+		userName:    nick,
+		buildId:     "IRC",
+		nonce:       "irc",
 	}
 	return client
 }
@@ -723,13 +736,27 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 }
 
 func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdError {
-	nrClients := server.NrActiveClients()
+	var nrClients int = 0
+	if client.protocolVersion >= 3 {
+		nrClients = server.NrActiveClients()
+	} else {
+		// Hide IRC users in the lobby of build19 clients. They would appear
+		// at the top of the player list, confusing the user
+		server.ForeachActiveClient(func(otherClient *Client) {
+			if otherClient.buildId != "IRC" {
+				nrClients++
+			}
+		})
+	}
 	data := make([]interface{}, 2+nrClients*5)
 
 	data[0] = "CLIENTS"
 	data[1] = nrClients
 	n := 2
 	server.ForeachActiveClient(func(otherClient *Client) {
+		if client.protocolVersion < 3 && otherClient.buildId == "IRC" {
+			return
+		}
 		data[n+0] = otherClient.userName
 		data[n+1] = otherClient.buildId
 		if otherClient.game != nil {

@@ -27,7 +27,7 @@ func New(rawData ...interface{}) []byte {
 				nbytes += len("false") + 1
 			}
 		default:
-			log.Fatal("Unknown type in New().")
+			log.Fatalf("Unknown type in packet.New(), got %T", v)
 		}
 	}
 

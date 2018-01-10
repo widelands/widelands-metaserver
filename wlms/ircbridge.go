@@ -2,12 +2,33 @@ package main
 
 import (
 	"log"
-
 	"github.com/thoj/go-ircevent"
+	"strings"
 )
 
+// Structure with channels for communication between IRCBridger and the metaserver
+type IRCBridgerChannels struct {
+	// Messages sent by IRC users that should be displayed in the lobby
+	messagesFromIRC  chan Message
+	// Messages from players in the lobby that should be relayed to IRC
+	messagesToIRC chan Message
+	// Clients joining the IRC channel that should be added to the client list in the lobby
+	clientsJoiningIRC chan string
+	// Clients leaving the IRC channel
+	clientsLeavingIRC chan string
+}
+
+func NewIRCBridgerChannels() *IRCBridgerChannels {
+	return &IRCBridgerChannels{
+		messagesFromIRC:   make(chan Message, 50),
+		messagesToIRC:     make(chan Message, 50),
+		clientsJoiningIRC: make(chan string, 50),
+		clientsLeavingIRC: make(chan string, 50),
+	}
+}
+
 type IRCBridger interface {
-	Connect(chan Message, chan Message) bool
+	Connect(*IRCBridgerChannels) bool
 	Quit()
 }
 
@@ -31,7 +52,7 @@ func NewIRCBridge(server, realname, nickname, channel string, tls bool) *IRCBrid
 	}
 }
 
-func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Message) bool {
+func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 	//Create new connection
 	bridge.connection = irc.IRC(bridge.nick, bridge.user)
 	//Set options
@@ -50,16 +71,49 @@ func (bridge *IRCBridge) Connect(messagesIn chan Message, messagesOut chan Messa
 		//e.Nick Contains the sender
 		//e.Arguments[0] Contains the channel
 		select {
-		case messagesOut <- Message{nick: event.Nick,
+		case channels.messagesFromIRC <- Message{nick: event.Nick,
 			message: event.Message(),
 		}:
 		default:
-			log.Println("Message Queue full.")
+			log.Println("IRC Message Queue full.")
 		}
-
+	})
+	bridge.connection.AddCallback("JOIN", func(e *irc.Event) {
+		if e.Nick == bridge.nick {
+			return
+		}
+		select {
+		case channels.clientsJoiningIRC <- e.Nick:
+		default:
+			log.Println("IRC Joining Queue full.")
+		}
+	})
+	bridge.connection.AddCallback("QUIT", func(e *irc.Event) {
+		if e.Nick == bridge.nick {
+			return
+		}
+		select {
+		case channels.clientsLeavingIRC <- e.Nick:
+		default:
+			log.Println("IRC Quitting Queue full.")
+		}
+	})
+	// NAMREPLY: List of all nicknames in the channel. Send when we join
+	bridge.connection.AddCallback("353", func(e *irc.Event) {
+		nicks := strings.Fields(e.Message())
+		for _, nick := range nicks {
+			if nick == bridge.nick {
+				continue
+			}
+			select {
+			case channels.clientsJoiningIRC <- nick:
+			default:
+				log.Println("IRC Joining Queue full.")
+			}
+		}
 	})
 	go func() {
-		for m := range messagesIn {
+		for m := range channels.messagesToIRC {
 			bridge.connection.Privmsg(bridge.channel, m.message)
 		}
 	}()
