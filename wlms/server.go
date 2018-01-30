@@ -114,14 +114,22 @@ func (s *Server) AddClient(client *Client) {
 func (s *Server) RemoveClient(client *Client) {
 	// Sanity check: make sure this user is not in our list of clients more than
 	// once.
-	cnt := 0
+	cntGame := 0
+	cntIRC := 0
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client).Name() == client.Name() {
-			cnt++
+			if e.Value.(*Client).buildId == "IRC" {
+				cntIRC++
+			} else {
+				cntGame++
+			}
 		}
 	}
-	if cnt > 1 {
-		log.Printf("Warning: %s is in the client list %d times", client.Name(), cnt)
+	if cntIRC > 1 {
+		log.Printf("Warning: IRC client %s is in the client list %d times", client.Name(), cntIRC)
+	}
+	if cntGame > 1 {
+		log.Printf("Warning: Game client %s is in the client list %d times", client.Name(), cntGame)
 	}
 
 	// Now remove the client for good if it is around.
