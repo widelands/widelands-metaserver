@@ -107,7 +107,9 @@ func (s *Server) NewGamePinger(ip string, ping_timeout time.Duration) *GamePinge
 }
 
 func (s *Server) AddClient(client *Client) {
-	s.BroadcastToIrc(client.Name() + " has joined the lobby.")
+	if client.buildId != "IRC" {
+		s.BroadcastToIrc(client.Name() + " has joined the lobby.")
+	}
 	s.clients.PushBack(client)
 }
 
@@ -135,12 +137,15 @@ func (s *Server) RemoveClient(client *Client) {
 	// Now remove the client for good if it is around.
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client) == client {
-			log.Printf("Removing client %s", client.Name())
-			s.clients.Remove(e)
-			s.irc.messagesToIRC <- Message{
-				message: client.Name() + " has left the lobby",
-				nick:    client.Name(),
+			if client.buildId != "IRC" {
+				log.Printf("Removing client %s", client.Name())
+				s.irc.messagesToIRC <- Message{
+					message: client.Name() + " has left the lobby",
+					nick:    client.Name(),
+				}
 			}
+			s.clients.Remove(e)
+			break;
 		}
 	}
 }
@@ -464,8 +469,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 				server.BroadcastToConnectedClients("CHAT", m.nick, m.message, "public")
 			case nick := <-irc.clientsJoiningIRC:
 				client := NewIRCClient(nick)
-				// Not using AddClient() since we don't want a broadcast to IRC here
-				server.clients.PushBack(client)
+				server.AddClient(client)
 				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 			case nick := <-irc.clientsLeavingIRC:
 				client := server.HasClient(nick)
