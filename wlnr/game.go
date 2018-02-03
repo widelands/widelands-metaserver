@@ -57,6 +57,7 @@ func NewGame(name, password string, server *Server) *Game {
 		server:                server,
 		currentlyShuttingDown: false,
 	}
+	time.AfterFunc(30 * time.Second, func() { server.CheckGameForHost(name) })
 	return game
 }
 
