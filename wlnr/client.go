@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const PING_INTERVAL_S = 30
+const PING_INTERVAL_S = 15
 
 // Structure to bundle the TCP connection with its packet buffer
 type Client struct {
