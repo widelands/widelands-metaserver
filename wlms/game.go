@@ -42,6 +42,7 @@ type Game struct {
 	host       string
 	players    map[string]bool
 	name       string
+	buildId    string
 	maxPlayers int
 	state      GameState
 	usesRelay  bool // True if all network traffic passes through our relay server.
@@ -158,10 +159,11 @@ func (game *Game) pingCycle(server *Server) {
 }
 
 // TODO(Notabilis): Remove all this useless maxPlayers stuff or find a use for it. Currently its always 1024.
-func NewGame(host string, server *Server, gameName string, maxPlayers int, shouldUseRelay bool) *Game {
+func NewGame(host string, buildId string, server *Server, gameName string, maxPlayers int, shouldUseRelay bool) *Game {
 	game := &Game{
 		players:    make(map[string]bool),
 		host:       host,
+		buildId:    buildId,
 		name:       gameName,
 		maxPlayers: maxPlayers,
 		state:      INITIAL_SETUP,
@@ -177,6 +179,10 @@ func NewGame(host string, server *Server, gameName string, maxPlayers int, shoul
 
 func (g Game) Name() string {
 	return g.name
+}
+
+func (g Game) BuildId() string {
+	return g.buildId
 }
 
 func (g Game) State() GameState {
