@@ -117,6 +117,9 @@ func (c *Client) SendCommand(cmd *Command) {
 
 // Sends a disconnect message and closes the connection
 func (c *Client) Disconnect(reason string) {
+	if c.conn == nil {
+		return
+	}
 	log.Printf("Disconnecting client (id=%v) because %v\n", c.id, reason)
 	cmd := NewCommand(kDisconnect)
 	cmd.AppendString(reason)
