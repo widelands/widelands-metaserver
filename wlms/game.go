@@ -112,7 +112,9 @@ func (game *Game) doPing(server *Server, host string, pingTimeout time.Duration)
 
 func (game *Game) pingCycle(server *Server) {
 	// Remember to remove the game when we no longer receive pings.
-	defer server.RemoveGame(game)
+	if !game.usesRelay {
+		defer server.RemoveGame(game)
+	}
 
 	first_ping := true
 	ping_primary_ip := true
@@ -210,8 +212,12 @@ func (g *Game) AddPlayer(userName string) {
 
 func (g *Game) RemovePlayer(userName string, server *Server) {
 	if userName == g.host {
-		log.Printf("Host %v leaves game '%v'. This ends the game", userName, g.name)
-		server.RemoveGame(g)
+		if !g.usesRelay {
+			log.Printf("Host %v leaves self-hosted game '%v'. This ends the game", userName, g.name)
+			server.RemoveGame(g)
+		} else {
+			log.Printf("Host %v leaves game '%v' on relay.", userName, g.name)
+		}
 		return
 	}
 
