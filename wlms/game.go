@@ -216,7 +216,7 @@ func (g *Game) RemovePlayer(userName string, server *Server) {
 			log.Printf("Host %v leaves self-hosted game '%v'. This ends the game", userName, g.name)
 			server.RemoveGame(g)
 		} else {
-			log.Printf("Host %v leaves game '%v' on relay.", userName, g.name)
+			log.Printf("Host %v leaves game '%v' on relay", userName, g.name)
 		}
 		return
 	}
