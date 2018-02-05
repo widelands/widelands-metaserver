@@ -59,7 +59,7 @@ func (s *Server) GameConnected(name string) {
 }
 
 // Search for a game with the given name. If it exists but no host is connected, remove it
-func (s *Server) CheckGameForHost(name string) {
+func (s *Server) RemoveGameIfNoHostIsConnected(name string) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		g := e.Value.(*Game)
 		if g.Name() == name && g.host == nil {
