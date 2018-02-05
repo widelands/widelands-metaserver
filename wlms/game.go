@@ -42,6 +42,7 @@ type Game struct {
 	host       string
 	players    map[string]bool
 	name       string
+	buildId    string
 	maxPlayers int
 	state      GameState
 	usesRelay  bool // True if all network traffic passes through our relay server.
@@ -111,7 +112,9 @@ func (game *Game) doPing(server *Server, host string, pingTimeout time.Duration)
 
 func (game *Game) pingCycle(server *Server) {
 	// Remember to remove the game when we no longer receive pings.
-	defer server.RemoveGame(game)
+	if !game.usesRelay {
+		defer server.RemoveGame(game)
+	}
 
 	first_ping := true
 	ping_primary_ip := true
@@ -158,10 +161,11 @@ func (game *Game) pingCycle(server *Server) {
 }
 
 // TODO(Notabilis): Remove all this useless maxPlayers stuff or find a use for it. Currently its always 1024.
-func NewGame(host string, server *Server, gameName string, maxPlayers int, shouldUseRelay bool) *Game {
+func NewGame(host string, buildId string, server *Server, gameName string, maxPlayers int, shouldUseRelay bool) *Game {
 	game := &Game{
 		players:    make(map[string]bool),
 		host:       host,
+		buildId:    buildId,
 		name:       gameName,
 		maxPlayers: maxPlayers,
 		state:      INITIAL_SETUP,
@@ -177,6 +181,10 @@ func NewGame(host string, server *Server, gameName string, maxPlayers int, shoul
 
 func (g Game) Name() string {
 	return g.name
+}
+
+func (g Game) BuildId() string {
+	return g.buildId
 }
 
 func (g Game) State() GameState {
@@ -204,8 +212,12 @@ func (g *Game) AddPlayer(userName string) {
 
 func (g *Game) RemovePlayer(userName string, server *Server) {
 	if userName == g.host {
-		log.Printf("Host %v leaves game '%v'. This ends the game", userName, g.name)
-		server.RemoveGame(g)
+		if !g.usesRelay {
+			log.Printf("Host %v leaves self-hosted game '%v'. This ends the game", userName, g.name)
+			server.RemoveGame(g)
+		} else {
+			log.Printf("Host %v leaves game '%v' on relay", userName, g.name)
+		}
 		return
 	}
 

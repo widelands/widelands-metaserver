@@ -239,7 +239,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 					client.SendPacket("ERROR", cmdName, pkgErr.What)
 					client.Disconnect(*server)
 				case InvalidPacketError:
-					log.Printf("Error while handling non-existing command %v from client %v", cmdName, client.Name())
+					log.Printf("Error while handling command %v from client %v", cmdName, client.Name())
 					client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 					client.Disconnect(*server)
 				default:
@@ -632,7 +632,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 	if client.protocolVersion < 1 {
 		// Client does not support the relay server. Let him host his game
 		log.Printf("Starting new game '%v' on computer of host %v", gameName, client.Name())
-		client.setGame(NewGame(client.userName, server, gameName, maxPlayer, false /* do not use relay */), server)
+		client.setGame(NewGame(client.userName, client.buildId, server, gameName, maxPlayer, false /* do not use relay */), server)
 	} else {
 		// Client does support the relay server. Start a game there
 		log.Printf("Starting new game '%v' on relay for host %v", gameName, client.Name())
@@ -641,7 +641,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 			// Not good. Should not happen
 			return CmdPacketError{"RELAY_ERROR"}
 		}
-		game := NewGame(client.userName, server, gameName, maxPlayer, true /* use relay */)
+		game := NewGame(client.userName, client.buildId, server, gameName, maxPlayer, true /* use relay */)
 		ips := server.GetRelayAddresses()
 		if client.hasV4 && client.hasV6 {
 			client.SendPacket("GAME_OPEN", ips.ipv6, true, ips.ipv4)
@@ -782,7 +782,7 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError 
 	server.ForeachGame(func(game *Game) {
 		host := server.HasClient(game.Host())
 		data[n+0] = game.Name()
-		data[n+1] = host.buildId
+		data[n+1] = game.BuildId()
 		// A game is connectable when the client supports the IP version of the game
 		// (and the game is connectable itself, of course)
 		connectable := game.State() == CONNECTABLE_BOTH

@@ -58,6 +58,23 @@ func (s *Server) GameConnected(name string) {
 	s.wlms.Call("ServerRPC.GameConnected", data, &ignored)
 }
 
+// Search for a game with the given name. If it exists but no host is connected, remove it
+func (s *Server) RemoveGameIfNoHostIsConnected(name string) {
+	for e := s.games.Front(); e != nil; e = e.Next() {
+		g := e.Value.(*Game)
+		if g.Name() == name && g.host == nil {
+			log.Printf("Removing game %v since no host connected to it", name)
+			var ignored bool
+			data := rpc_data.NewGameData{
+				Name: name,
+			}
+			s.wlms.Call("ServerRPC.GameClosed", data, &ignored)
+			s.games.Remove(e)
+			return
+		}
+	}
+}
+
 func (s *Server) RemoveGame(game *Game) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Game) == game {

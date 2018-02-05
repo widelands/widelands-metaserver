@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const PING_INTERVAL_S = 30
+const PING_INTERVAL_S = 90
 
 // Structure to bundle the TCP connection with its packet buffer
 type Client struct {
@@ -117,6 +117,9 @@ func (c *Client) SendCommand(cmd *Command) {
 
 // Sends a disconnect message and closes the connection
 func (c *Client) Disconnect(reason string) {
+	if c.conn == nil {
+		return
+	}
 	log.Printf("Disconnecting client (id=%v) because %v\n", c.id, reason)
 	cmd := NewCommand(kDisconnect)
 	cmd.AppendString(reason)
