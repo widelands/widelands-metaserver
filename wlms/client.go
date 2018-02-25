@@ -419,11 +419,11 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 	}
 
 	// Check protocol version
-	if c.protocolVersion != 0 && c.protocolVersion != 3 {
+	if c.protocolVersion != 0 && c.protocolVersion != 4 {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
 
-	if isRegisteredOnServer || c.protocolVersion == 3 {
+	if isRegisteredOnServer || c.protocolVersion >= 3 {
 		nonce, err := pkg.ReadString()
 		if err != nil {
 			return CriticalCmdPacketError{err.Error()}
@@ -537,7 +537,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 		return CriticalCmdPacketError{err.Error()}
 	}
 
-	if isRegisteredOnServer || protocolVersion == 3 {
+	if isRegisteredOnServer || protocolVersion >= 3 {
 		n, err := pkg.ReadString()
 		if err != nil {
 			return CriticalCmdPacketError{err.Error()}
@@ -591,7 +591,7 @@ func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdErro
 		return CmdPacketError{err.Error()}
 	}
 
-	if protocolVersion != 3 {
+	if protocolVersion != 4 {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
 
