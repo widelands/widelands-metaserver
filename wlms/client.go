@@ -780,7 +780,6 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError 
 	data[1] = nrGames
 	n := 2
 	server.ForeachGame(func(game *Game) {
-		host := server.HasClient(game.Host())
 		data[n+0] = game.Name()
 		data[n+1] = game.BuildId()
 		// A game is connectable when the client supports the IP version of the game
