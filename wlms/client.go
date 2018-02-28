@@ -651,7 +651,8 @@ func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdErro
 	}
 
 	old_client := server.HasClient(client.userName)
-	if old_client == nil || old_client.userName != client.userName || old_client.nonce != client.nonce {
+	if old_client == nil || old_client.userName != client.userName
+			|| (old_client.nonce != client.nonce && old_client.permissions == UNREGISTERED) {
 		log.Printf("Someone failed to register an IP for client %v", old_client.Name())
 		return CriticalCmdPacketError{"NOT_LOGGED_IN"}
 	}
