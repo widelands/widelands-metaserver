@@ -477,7 +477,7 @@ func (c *Client) Handle_PWD_CHALLENGE(server *Server, pkg *packet.Packet) CmdErr
 	switch c.state {
 	case HANDSHAKE:
 		c.permissions = server.UserDb().Permissions(c.userName)
-		c.nonce = "registered"
+		c.nonce = server.UserDb().GenerateDowngradedUserNonce(c.userName, c.userName)
 		return c.findReplaceCandidates(server, true)
 	case TELL_IP:
 		c.finishTellIp(server)
@@ -544,6 +544,7 @@ func (c *Client) checkCandidates(server *Server) {
 	oldClient, c.replaceCandidates = c.replaceCandidates[0], c.replaceCandidates[1:]
 	if oldClient.userName != c.userName {
 		// Other username: Drop permissions
+		c.nonce = server.UserDb().GenerateDowngradedUserNonce(c.userName, oldClient.userName)
 		c.permissions = UNREGISTERED
 	}
 	if oldClient.pendingLogin != nil {
@@ -579,6 +580,7 @@ func (c *Client) findUnconnectedName(server *Server) {
 		oldClient := server.HasClient(c.userName)
 		if oldClient == nil {
 			// Found a free name
+			c.nonce = server.UserDb().GenerateDowngradedUserNonce(baseName, c.userName)
 			c.loginDone(server)
 			return
 		}
@@ -651,8 +653,7 @@ func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdErro
 	}
 
 	old_client := server.HasClient(client.userName)
-	if old_client == nil || old_client.userName != client.userName
-			|| (old_client.nonce != client.nonce && old_client.permissions == UNREGISTERED) {
+	if old_client == nil || old_client.userName != client.userName || (old_client.nonce != client.nonce && old_client.permissions == UNREGISTERED) {
 		log.Printf("Someone failed to register an IP for client %v", old_client.Name())
 		return CriticalCmdPacketError{"NOT_LOGGED_IN"}
 	}

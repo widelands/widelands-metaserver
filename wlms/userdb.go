@@ -16,6 +16,7 @@ type UserDb interface {
 	ContainsName(name string) bool
 	PasswordCorrect(name, password string) bool
 	GenerateChallengeResponsePair(name string) (string, string, bool)
+	GenerateDowngradedUserNonce(registeredName, assignedName string) string
 	Permissions(name string) Permissions
 	Close()
 }
@@ -75,6 +76,18 @@ func (i InMemoryUserDb) GenerateChallengeResponsePair(name string) (string, stri
 		return "", "", false
 	}
 	return generateChallengeResponsePair(i.users[name].password)
+}
+
+func (i InMemoryUserDb) GenerateDowngradedUserNonce(registeredName, assignedName string) string {
+	if !i.ContainsName(registeredName) {
+		log.Printf("Error: Asked to create nonce for unregistered user")
+		return "unregistered"
+	}
+
+	h := sha1.New()
+	io.WriteString(h, assignedName)
+	io.WriteString(h, i.users[registeredName].password)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (i InMemoryUserDb) Permissions(name string) Permissions {
@@ -153,6 +166,19 @@ func (db *SqlDatabase) GenerateChallengeResponsePair(name string) (string, strin
 		return "", "", false
 	}
 	return generateChallengeResponsePair(string(goldenHash))
+}
+
+func (db *SqlDatabase) GenerateDowngradedUserNonce(registeredName, assignedName string) string {
+	goldenHash := db.retrievePasswordHash(registeredName)
+	if goldenHash == nil {
+		log.Printf("Error: Asked to create nonce for unregistered user")
+		return "unregistered"
+	}
+
+	h := sha1.New()
+	io.WriteString(h, assignedName)
+	io.WriteString(h, string(goldenHash))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (db *SqlDatabase) Permissions(name string) Permissions {
