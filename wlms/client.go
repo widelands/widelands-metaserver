@@ -694,9 +694,15 @@ func (client *Client) finishTellIp(server *Server) {
 
 func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdError {
 	var gameName string
-	var maxPlayer int
-	if err := pkg.Unpack(&gameName, &maxPlayer); err != nil {
-		return CmdPacketError{err.Error()}
+	if client.protocolVersion < 4 {
+		var maxPlayer int
+		if err := pkg.Unpack(&gameName, &maxPlayer); err != nil {
+			return CmdPacketError{err.Error()}
+		}
+	} else {
+		if err := pkg.Unpack(&gameName); err != nil {
+			return CmdPacketError{err.Error()}
+		}
 	}
 	if server.HasGame(gameName) != nil {
 		return CmdPacketError{"GAME_EXISTS"}
@@ -705,7 +711,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 	if client.protocolVersion < 1 {
 		// Client does not support the relay server. Let him host his game
 		log.Printf("Starting new game '%v' on computer of host %v", gameName, client.Name())
-		client.setGame(NewGame(client.userName, client.buildId, server, gameName, maxPlayer, false /* do not use relay */), server)
+		client.setGame(NewGame(client.userName, client.buildId, server, gameName, false /* do not use relay */), server)
 	} else {
 		// Client does support the relay server. Start a game there
 		log.Printf("Starting new game '%v' on relay for host %v", gameName, client.Name())
@@ -720,7 +726,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 			// Not good. Should not happen
 			return CmdPacketError{"RELAY_ERROR"}
 		}
-		game := NewGame(client.userName, client.buildId, server, gameName, maxPlayer, true /* use relay */)
+		game := NewGame(client.userName, client.buildId, server, gameName, true /* use relay */)
 		ips := server.GetRelayAddresses()
 		if client.hasV4 && client.hasV6 {
 			client.SendPacket("GAME_OPEN", challenge, ips.ipv6, true, ips.ipv4)
@@ -745,9 +751,6 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 	game := server.HasGame(gameName)
 	if game == nil {
 		return CmdPacketError{"NO_SUCH_GAME"}
-	}
-	if game.NrPlayers() == game.MaxPlayers() {
-		return CmdPacketError{"GAME_FULL"}
 	}
 
 	log.Printf("Client %v joined game '%v'", client.userName, game.Name())
