@@ -51,7 +51,11 @@ func (i InMemoryUserDb) PasswordCorrect(name, password string) bool {
 	if !i.ContainsName(name) {
 		return false
 	}
-	return i.users[name].password == password
+	h := sha1.New()
+	io.WriteString(h, password)
+	passwordHash := h.Sum(nil)
+
+	return i.users[name].password == hex.EncodeToString(passwordHash)
 }
 
 func generateChallengeResponsePair(passwordHash string) (string, string, bool) {
