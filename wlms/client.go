@@ -449,7 +449,7 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 			return failed
 		}
 	}
-	return c.findReplaceCandidates(server, false)
+	return c.findReplaceCandidates(server, isRegisteredOnServer)
 }
 
 func (c *Client) sendChallenge(server *Server) {
@@ -580,7 +580,9 @@ func (c *Client) findUnconnectedName(server *Server) {
 		oldClient := server.HasClient(c.userName)
 		if oldClient == nil {
 			// Found a free name
-			c.nonce = server.UserDb().GenerateDowngradedUserNonce(baseName, c.userName)
+			if c.protocolVersion >= 4 {
+				c.nonce = server.UserDb().GenerateDowngradedUserNonce(baseName, c.userName)
+			}
 			c.loginDone(server)
 			return
 		}
