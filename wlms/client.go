@@ -456,7 +456,7 @@ func (c *Client) sendChallenge(server *Server) {
 	// The nonce is empty when using challenge-response. Use it to store the response
 	var challenge string
 	var success bool
-	challenge, c.nonce, success = server.UserDb().GenerateChallengeResponsePair(c.userName)
+	challenge, c.nonce, success = server.UserDb().GenerateChallengeResponsePairFromUsername(c.userName)
 	if !success {
 		// Should not happen, but who knows
 		c.Disconnect(*server)
@@ -717,9 +717,16 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 	} else {
 		// Client does support the relay server. Start a game there
 		log.Printf("Starting new game '%v' on relay for host %v", gameName, client.Name())
-		challenge, response, success := server.UserDb().GenerateChallengeResponsePair(client.userName)
+		var challenge, response string
+		var success bool
+		if client.permissions == REGISTERED {
+			challenge, response, success = server.UserDb().GenerateChallengeResponsePairFromUsername(client.userName)
+		} else {
+			challenge, response, success = GenerateChallengeResponsePairFromSecret(client.nonce)
+		}
 		if !success {
 			// Should not happen
+			log.Printf("Error: Failed to generate challenge/response for client %v when opening game on relay", client.userName)
 			client.Disconnect(*server)
 			return nil
 		}

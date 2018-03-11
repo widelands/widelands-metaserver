@@ -15,7 +15,7 @@ import (
 type UserDb interface {
 	ContainsName(name string) bool
 	PasswordCorrect(name, password string) bool
-	GenerateChallengeResponsePair(name string) (string, string, bool)
+	GenerateChallengeResponsePairFromUsername(name string) (string, string, bool)
 	GenerateDowngradedUserNonce(registeredName, assignedName string) string
 	Permissions(name string) Permissions
 	Close()
@@ -58,7 +58,7 @@ func (i InMemoryUserDb) PasswordCorrect(name, password string) bool {
 	return i.users[name].password == hex.EncodeToString(passwordHash)
 }
 
-func generateChallengeResponsePair(passwordHash string) (string, string, bool) {
+func GenerateChallengeResponsePairFromSecret(passwordHash string) (string, string, bool) {
 	nonce := make([]byte, 16)
 	_, err := rand.Read(nonce)
 	if err != nil {
@@ -75,11 +75,11 @@ func generateChallengeResponsePair(passwordHash string) (string, string, bool) {
 	return challenge, response, true
 }
 
-func (i InMemoryUserDb) GenerateChallengeResponsePair(name string) (string, string, bool) {
+func (i InMemoryUserDb) GenerateChallengeResponsePairFromUsername(name string) (string, string, bool) {
 	if !i.ContainsName(name) {
 		return "", "", false
 	}
-	return generateChallengeResponsePair(i.users[name].password)
+	return GenerateChallengeResponsePairFromSecret(i.users[name].password)
 }
 
 func (i InMemoryUserDb) GenerateDowngradedUserNonce(registeredName, assignedName string) string {
@@ -164,12 +164,12 @@ func (db *SqlDatabase) PasswordCorrect(name, password string) bool {
 	return string(goldenHash) == string(givenHash)
 }
 
-func (db *SqlDatabase) GenerateChallengeResponsePair(name string) (string, string, bool) {
+func (db *SqlDatabase) GenerateChallengeResponsePairFromUsername(name string) (string, string, bool) {
 	goldenHash := db.retrievePasswordHash(name)
 	if goldenHash == nil {
 		return "", "", false
 	}
-	return generateChallengeResponsePair(hex.EncodeToString(goldenHash))
+	return GenerateChallengeResponsePairFromSecret(hex.EncodeToString(goldenHash))
 }
 
 func (db *SqlDatabase) GenerateDowngradedUserNonce(registeredName, assignedName string) string {
