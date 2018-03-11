@@ -37,6 +37,7 @@ type State int
 
 const (
 	HANDSHAKE State = iota
+	TELL_IP
 	CONNECTED
 	RECENTLY_DISCONNECTED
 )
@@ -119,6 +120,8 @@ func (c *Client) setState(s State, server Server) {
 		need_broadcast = c.state == CONNECTED
 	case CONNECTED:
 		need_broadcast = c.state == HANDSHAKE || c.state == RECENTLY_DISCONNECTED
+	case TELL_IP:
+		break
 	default:
 		log.Fatal("Unkown state in setState")
 	}
@@ -419,11 +422,11 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 	}
 
 	// Check protocol version
-	if c.protocolVersion != 0 && c.protocolVersion != 3 {
+	if c.protocolVersion != 0 && c.protocolVersion != 4 {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
 
-	if isRegisteredOnServer || c.protocolVersion == 3 {
+	if isRegisteredOnServer || c.protocolVersion >= 3 {
 		nonce, err := pkg.ReadString()
 		if err != nil {
 			return CriticalCmdPacketError{err.Error()}
@@ -436,11 +439,65 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 		if !server.UserDb().ContainsName(c.userName) {
 			return CriticalCmdPacketError{"WRONG_PASSWORD"}
 		}
-		if !server.UserDb().PasswordCorrect(c.userName, c.nonce) {
-			return CriticalCmdPacketError{"WRONG_PASSWORD"}
+		if c.protocolVersion >= 4 {
+			// Send a challenge for secure passwort transmission
+			c.sendChallenge(server)
+			return nil
 		}
-		c.permissions = server.UserDb().Permissions(c.userName)
+		failed := c.checkCredentialsLegacy(server)
+		if failed != nil {
+			return failed
+		}
 	}
+	return c.findReplaceCandidates(server, isRegisteredOnServer)
+}
+
+func (c *Client) sendChallenge(server *Server) {
+	// The nonce is empty when using challenge-response. Use it to store the response
+	var challenge string
+	var success bool
+	challenge, c.nonce, success = server.UserDb().GenerateChallengeResponsePair(c.userName)
+	if !success {
+		// Should not happen, but who knows
+		c.Disconnect(*server)
+		return
+	}
+	c.SendPacket("PWD_CHALLENGE", challenge)
+}
+
+func (c *Client) Handle_PWD_CHALLENGE(server *Server, pkg *packet.Packet) CmdError {
+	var response string
+	if err := pkg.Unpack(&response); err != nil {
+		return CriticalCmdPacketError{err.Error()}
+	}
+	if c.nonce != response {
+		return CriticalCmdPacketError{"WRONG_PASSWORD"}
+	}
+	// Password is fine
+	switch c.state {
+	case HANDSHAKE:
+		c.permissions = server.UserDb().Permissions(c.userName)
+		c.nonce = server.UserDb().GenerateDowngradedUserNonce(c.userName, c.userName)
+		return c.findReplaceCandidates(server, true)
+	case TELL_IP:
+		c.finishTellIp(server)
+	default:
+		c.SendPacket("ERROR", "PWD_CHALLENGE", "Invalid connection state")
+		c.Disconnect(*server)
+	}
+	return nil
+}
+
+func (c *Client) checkCredentialsLegacy(server *Server) CmdError {
+	if !server.UserDb().PasswordCorrect(c.userName, c.nonce) {
+		return CriticalCmdPacketError{"WRONG_PASSWORD"}
+	}
+	c.permissions = server.UserDb().Permissions(c.userName)
+	// Everything fine
+	return nil
+}
+
+func (c *Client) findReplaceCandidates(server *Server, isRegisteredOnServer bool) CmdError {
 	// Check for clients which are using the same nonce
 	c.replaceCandidates = server.FindClientsToReplace(c.nonce, c.userName)
 	if len(c.replaceCandidates) == 0 {
@@ -487,6 +544,7 @@ func (c *Client) checkCandidates(server *Server) {
 	oldClient, c.replaceCandidates = c.replaceCandidates[0], c.replaceCandidates[1:]
 	if oldClient.userName != c.userName {
 		// Other username: Drop permissions
+		c.nonce = server.UserDb().GenerateDowngradedUserNonce(c.userName, oldClient.userName)
 		c.permissions = UNREGISTERED
 	}
 	if oldClient.pendingLogin != nil {
@@ -522,6 +580,9 @@ func (c *Client) findUnconnectedName(server *Server) {
 		oldClient := server.HasClient(c.userName)
 		if oldClient == nil {
 			// Found a free name
+			if c.protocolVersion >= 4 {
+				c.nonce = server.UserDb().GenerateDowngradedUserNonce(baseName, c.userName)
+			}
 			c.loginDone(server)
 			return
 		}
@@ -537,7 +598,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 		return CriticalCmdPacketError{err.Error()}
 	}
 
-	if isRegisteredOnServer || protocolVersion == 3 {
+	if isRegisteredOnServer || protocolVersion >= 3 {
 		n, err := pkg.ReadString()
 		if err != nil {
 			return CriticalCmdPacketError{err.Error()}
@@ -585,24 +646,40 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 }
 
 func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdError {
-	var protocolVersion int
-	var name, nonce string
-	if err := pkg.Unpack(&protocolVersion, &name, &nonce); err != nil {
+	if err := pkg.Unpack(&client.protocolVersion, &client.userName, &client.nonce); err != nil {
 		return CmdPacketError{err.Error()}
 	}
 
-	if protocolVersion != 3 {
+	if client.protocolVersion != 4 {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
 
-	old_client := server.HasClient(name)
-	if old_client == nil || old_client.userName != name || old_client.nonce != nonce {
+	old_client := server.HasClient(client.userName)
+	if old_client == nil || old_client.userName != client.userName || (old_client.nonce != client.nonce && old_client.permissions == UNREGISTERED) {
 		log.Printf("Someone failed to register an IP for client %v", old_client.Name())
 		return CriticalCmdPacketError{"NOT_LOGGED_IN"}
 	}
 
+	if old_client.permissions == REGISTERED {
+		// Registered user: Force password check
+		client.setState(TELL_IP, *server)
+		client.sendChallenge(server)
+		return nil
+	}
+
+	// Unregistered user. Check nonce and replace the entry
+	client.finishTellIp(server)
+	return nil
+}
+
+func (client *Client) finishTellIp(server *Server) {
 	// We found the existing connection of this client.
 	// Update his IP and close this connection.
+	old_client := server.HasClient(client.userName)
+	if old_client == nil {
+		// Hm. Must have disconnected in the last seconds. Abort.
+		return
+	}
 	old_client.secondaryIp = client.remoteIp()
 	ip := net.ParseIP(old_client.otherIp())
 	if ip.To4() != nil {
@@ -615,15 +692,19 @@ func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdErro
 	// Tell the client to get a new list of games. The availability of games might have changed now that
 	// he supports more IP versions
 	old_client.SendPacket("GAMES_UPDATE")
-
-	return nil
 }
 
 func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdError {
 	var gameName string
-	var maxPlayer int
-	if err := pkg.Unpack(&gameName, &maxPlayer); err != nil {
-		return CmdPacketError{err.Error()}
+	if client.protocolVersion < 4 {
+		var maxPlayer int
+		if err := pkg.Unpack(&gameName, &maxPlayer); err != nil {
+			return CmdPacketError{err.Error()}
+		}
+	} else {
+		if err := pkg.Unpack(&gameName); err != nil {
+			return CmdPacketError{err.Error()}
+		}
 	}
 	if server.HasGame(gameName) != nil {
 		return CmdPacketError{"GAME_EXISTS"}
@@ -632,23 +713,29 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 	if client.protocolVersion < 1 {
 		// Client does not support the relay server. Let him host his game
 		log.Printf("Starting new game '%v' on computer of host %v", gameName, client.Name())
-		client.setGame(NewGame(client.userName, client.buildId, server, gameName, maxPlayer, false /* do not use relay */), server)
+		client.setGame(NewGame(client.userName, client.buildId, server, gameName, false /* do not use relay */), server)
 	} else {
 		// Client does support the relay server. Start a game there
 		log.Printf("Starting new game '%v' on relay for host %v", gameName, client.Name())
-		created := server.RelayCreateGame(gameName, client.nonce)
+		challenge, response, success := server.UserDb().GenerateChallengeResponsePair(client.userName)
+		if !success {
+			// Should not happen
+			client.Disconnect(*server)
+			return nil
+		}
+		created := server.RelayCreateGame(gameName, response)
 		if !created {
 			// Not good. Should not happen
 			return CmdPacketError{"RELAY_ERROR"}
 		}
-		game := NewGame(client.userName, client.buildId, server, gameName, maxPlayer, true /* use relay */)
+		game := NewGame(client.userName, client.buildId, server, gameName, true /* use relay */)
 		ips := server.GetRelayAddresses()
 		if client.hasV4 && client.hasV6 {
-			client.SendPacket("GAME_OPEN", ips.ipv6, true, ips.ipv4)
+			client.SendPacket("GAME_OPEN", challenge, ips.ipv6, true, ips.ipv4)
 		} else if client.hasV4 {
-			client.SendPacket("GAME_OPEN", ips.ipv4, false)
+			client.SendPacket("GAME_OPEN", challenge, ips.ipv4, false)
 		} else if client.hasV6 {
-			client.SendPacket("GAME_OPEN", ips.ipv6, false)
+			client.SendPacket("GAME_OPEN", challenge, ips.ipv6, false)
 		}
 		client.setGame(game, server)
 	}
@@ -666,9 +753,6 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 	game := server.HasGame(gameName)
 	if game == nil {
 		return CmdPacketError{"NO_SUCH_GAME"}
-	}
-	if game.NrPlayers() == game.MaxPlayers() {
-		return CmdPacketError{"GAME_FULL"}
 	}
 
 	log.Printf("Client %v joined game '%v'", client.userName, game.Name())
@@ -780,7 +864,6 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError 
 	data[1] = nrGames
 	n := 2
 	server.ForeachGame(func(game *Game) {
-		host := server.HasClient(game.Host())
 		data[n+0] = game.Name()
 		data[n+1] = game.BuildId()
 		// A game is connectable when the client supports the IP version of the game

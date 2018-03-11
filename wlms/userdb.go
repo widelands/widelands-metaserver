@@ -4,15 +4,19 @@ import (
 	"crypto/sha1"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	_ "github.com/ziutek/mymysql/godrv"
 	"io"
 	"log"
+	"crypto/rand"
 )
 
 type UserDb interface {
 	ContainsName(name string) bool
 	PasswordCorrect(name, password string) bool
+	GenerateChallengeResponsePair(name string) (string, string, bool)
+	GenerateDowngradedUserNonce(registeredName, assignedName string) string
 	Permissions(name string) Permissions
 	Close()
 }
@@ -31,7 +35,11 @@ func NewInMemoryDb() *InMemoryUserDb {
 }
 
 func (i *InMemoryUserDb) AddUser(name string, password string, perms Permissions) {
-	i.users[name] = user{password, perms}
+	h := sha1.New()
+	io.WriteString(h, password)
+	passwordHash := h.Sum(nil)
+
+	i.users[name] = user{hex.EncodeToString(passwordHash), perms}
 }
 
 func (i InMemoryUserDb) ContainsName(name string) bool {
@@ -43,7 +51,47 @@ func (i InMemoryUserDb) PasswordCorrect(name, password string) bool {
 	if !i.ContainsName(name) {
 		return false
 	}
-	return i.users[name].password == password
+	h := sha1.New()
+	io.WriteString(h, password)
+	passwordHash := h.Sum(nil)
+
+	return i.users[name].password == hex.EncodeToString(passwordHash)
+}
+
+func generateChallengeResponsePair(passwordHash string) (string, string, bool) {
+	nonce := make([]byte, 16)
+	_, err := rand.Read(nonce)
+	if err != nil {
+		log.Printf("Error when trying to create random nonce for login: %v", err)
+		return "", "", false
+	}
+	challenge := hex.EncodeToString(nonce)
+
+	h := sha1.New()
+	io.WriteString(h, challenge)
+	io.WriteString(h, passwordHash)
+	response := hex.EncodeToString(h.Sum(nil))
+
+	return challenge, response, true
+}
+
+func (i InMemoryUserDb) GenerateChallengeResponsePair(name string) (string, string, bool) {
+	if !i.ContainsName(name) {
+		return "", "", false
+	}
+	return generateChallengeResponsePair(i.users[name].password)
+}
+
+func (i InMemoryUserDb) GenerateDowngradedUserNonce(registeredName, assignedName string) string {
+	if !i.ContainsName(registeredName) {
+		log.Printf("Error: Asked to create nonce for unregistered user")
+		return "unregistered"
+	}
+
+	h := sha1.New()
+	io.WriteString(h, assignedName)
+	io.WriteString(h, i.users[registeredName].password)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (i InMemoryUserDb) Permissions(name string) Permissions {
@@ -85,13 +133,27 @@ func (db *SqlDatabase) ContainsName(name string) bool {
 	return true
 }
 
-func (db *SqlDatabase) PasswordCorrect(name, password string) bool {
+func (db *SqlDatabase) retrievePasswordHash(name string) []byte {
 	var id int64
 	if err := db.db.QueryRow("select id from auth_user where username=?", name).Scan(&id); err != nil {
-		return false
+		return nil
 	}
 	var golden string
 	if err := db.db.QueryRow("select password from wlggz_ggzauth where user_id=?", id).Scan(&golden); err != nil {
+		return nil
+	}
+
+	goldenHash, err := base64.StdEncoding.DecodeString(golden)
+	if err != nil {
+		return nil
+	}
+	return goldenHash
+}
+
+func (db *SqlDatabase) PasswordCorrect(name, password string) bool {
+
+	goldenHash := db.retrievePasswordHash(name)
+	if goldenHash == nil {
 		return false
 	}
 
@@ -99,11 +161,28 @@ func (db *SqlDatabase) PasswordCorrect(name, password string) bool {
 	io.WriteString(h, password)
 	givenHash := h.Sum(nil)
 
-	goldenHash, err := base64.StdEncoding.DecodeString(golden)
-	if err != nil {
-		return false
-	}
 	return string(goldenHash) == string(givenHash)
+}
+
+func (db *SqlDatabase) GenerateChallengeResponsePair(name string) (string, string, bool) {
+	goldenHash := db.retrievePasswordHash(name)
+	if goldenHash == nil {
+		return "", "", false
+	}
+	return generateChallengeResponsePair(string(goldenHash))
+}
+
+func (db *SqlDatabase) GenerateDowngradedUserNonce(registeredName, assignedName string) string {
+	goldenHash := db.retrievePasswordHash(registeredName)
+	if goldenHash == nil {
+		log.Printf("Error: Asked to create nonce for unregistered user")
+		return "unregistered"
+	}
+
+	h := sha1.New()
+	io.WriteString(h, assignedName)
+	io.WriteString(h, string(goldenHash))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (db *SqlDatabase) Permissions(name string) Permissions {
