@@ -169,7 +169,7 @@ func (db *SqlDatabase) GenerateChallengeResponsePair(name string) (string, strin
 	if goldenHash == nil {
 		return "", "", false
 	}
-	return generateChallengeResponsePair(string(goldenHash))
+	return generateChallengeResponsePair(hex.EncodeToString(goldenHash))
 }
 
 func (db *SqlDatabase) GenerateDowngradedUserNonce(registeredName, assignedName string) string {
@@ -181,7 +181,7 @@ func (db *SqlDatabase) GenerateDowngradedUserNonce(registeredName, assignedName 
 
 	h := sha1.New()
 	io.WriteString(h, assignedName)
-	io.WriteString(h, string(goldenHash))
+	io.WriteString(h, hex.EncodeToString(goldenHash))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
