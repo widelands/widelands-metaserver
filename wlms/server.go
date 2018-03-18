@@ -160,6 +160,16 @@ func (s Server) HasClient(name string) *Client {
 	return nil
 }
 
+func (s Server) HasIRCClient(name string) *Client {
+	for e := s.clients.Front(); e != nil; e = e.Next() {
+		client := e.Value.(*Client)
+		if client.Name() == name && client.buildId == "IRC" {
+			return client
+		}
+	}
+	return nil
+}
+
 func (s Server) FindClientsToReplace(nonce string, name string) []*Client {
 	res := make([]*Client, 0)
 	var best *Client = nil
@@ -468,11 +478,17 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 			case m := <-irc.messagesFromIRC:
 				server.BroadcastToConnectedClients("CHAT", m.nick, m.message, "public")
 			case nick := <-irc.clientsJoiningIRC:
+				old_client := server.HasIRCClient(nick)
+				if old_client != nil {
+					// Should not happen
+					log.Printf("Warning: Told to add IRC client %v which is already listed", nick)
+					break
+				}
 				client := NewIRCClient(nick)
 				server.AddClient(client)
 				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 			case nick := <-irc.clientsLeavingIRC:
-				client := server.HasClient(nick)
+				client := server.HasIRCClient(nick)
 				if client != nil {
 					server.RemoveClient(client)
 					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
