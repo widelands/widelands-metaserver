@@ -79,6 +79,7 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 		}
 	})
 	bridge.connection.AddCallback("JOIN", func(e *irc.Event) {
+		// An IRC user is joining our channel
 		if e.Nick == bridge.nick {
 			return
 		}
@@ -88,7 +89,20 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 			log.Println("IRC Joining Queue full.")
 		}
 	})
+	bridge.connection.AddCallback("PART", func(e *irc.Event) {
+		// An IRC user is leaving the channel but stays connected to the IRC server
+		if e.Nick == bridge.nick {
+			return
+		}
+		select {
+		case channels.clientsLeavingIRC <- e.Nick:
+		default:
+			log.Println("IRC Quitting Queue full.")
+		}
+	})
+
 	bridge.connection.AddCallback("QUIT", func(e *irc.Event) {
+		// An IRC user closes the connection to the IRC server
 		if e.Nick == bridge.nick {
 			return
 		}
