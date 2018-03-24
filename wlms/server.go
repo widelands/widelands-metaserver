@@ -145,7 +145,7 @@ func (s *Server) RemoveClient(client *Client) {
 				}
 			}
 			s.clients.Remove(e)
-			break;
+			break
 		}
 	}
 }
