@@ -35,7 +35,7 @@ func NewClientRPC(callback ClientCallback) Client {
 	// Open our rpc server
 	rpcLn, err := net.Listen("tcp", ":7399")
 	if err != nil {
-		log.Printf("Error when listening for RPC calls: ", err)
+		log.Printf("Error when listening for RPC calls: %v", err)
 		return nil
 	}
 	client.listener = rpcLn
@@ -55,7 +55,7 @@ func NewClientRPC(callback ClientCallback) Client {
 func (client *ClientRPC) connect() bool {
 	connection, err := net.DialTimeout("tcp", "localhost:7398", time.Duration(10)*time.Second)
 	if err != nil {
-		log.Printf("Unable to connect to relay server at localhost: ", err)
+		log.Printf("Unable to connect to relay server at localhost: %v", err)
 		return false
 	}
 	client.relay = rpc.NewClient(connection)
