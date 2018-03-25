@@ -1,5 +1,6 @@
-package relay_interface
+package relayinterface
 
+// GameData is the data structure passed between client and server over rpc.
 type GameData struct {
 	Name     string
 	Password string

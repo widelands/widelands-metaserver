@@ -2,7 +2,7 @@ package main
 
 import (
 	"container/list"
-	"github.com/widelands/widelands_metaserver/wlnr/relay_interface"
+	"github.com/widelands/widelands_metaserver/wlnr/relayinterface"
 	"log"
 	"net"
 )
@@ -12,7 +12,7 @@ type Server struct {
 	shutdownServer      chan bool
 	serverHasShutdown   chan bool
 	games               *list.List
-	wlms                relay_interface.Server
+	wlms                relayinterface.Server
 }
 
 func (s *Server) InitiateShutdown() error {
@@ -94,7 +94,7 @@ func RunServer() {
 		games:               list.New(),
 		wlms:                nil,
 	}
-	server.wlms = relay_interface.NewServerRPC(server)
+	server.wlms = relayinterface.NewServerRPC(server)
 	defer server.wlms.CloseConnection()
 
 	go server.mainLoop()

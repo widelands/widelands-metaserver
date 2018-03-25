@@ -2,7 +2,7 @@ package main
 
 import (
 	"container/list"
-	"github.com/widelands/widelands_metaserver/wlnr/relay_interface"
+	"github.com/widelands/widelands_metaserver/wlnr/relayinterface"
 	"io"
 	"log"
 	"net"
@@ -36,7 +36,7 @@ type Server struct {
 	clientForgetTimeout time.Duration
 	gamePingerFactory   GamePingerFactory
 	irc                 *IRCBridgerChannels
-	relay               relay_interface.Client
+	relay               relayinterface.Client
 	// The IP addresses of the wlnr instance
 	relay_address AddressPair
 }
@@ -408,7 +408,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		return nil
 	}
 
-	server.relay = relay_interface.NewClientRPC(server)
+	server.relay = relayinterface.NewClientRPC(server)
 
 	server.gamePingerFactory = RealGamePingerFactory{server}
 	go func() {

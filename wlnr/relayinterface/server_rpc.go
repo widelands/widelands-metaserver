@@ -1,4 +1,4 @@
-package relay_interface
+package relayinterface
 
 import (
 	"errors"
@@ -8,16 +8,23 @@ import (
 	"time"
 )
 
+// ServerRPC implements the server part of a rpc connection between
+// metaserver and relay server.
 type ServerRPC struct {
 	callback ServerCallback
 	client   *rpc.Client
 	listener net.Listener
 }
 
+// ServerRPCMethods is a helper structure for the exposed rpc methods
+// of the ServerRPC.
 type ServerRPCMethods struct {
 	server *ServerRPC
 }
 
+// NewServerRPC creates a struct that implements relayinterface.Server over RPC.
+// Opens an RPC server running on port 7398.
+// Methods of the given callback are called with notifications of the client.
 func NewServerRPC(callback ServerCallback) Server {
 	// Start rpc server so the metaserver can tell us about new games
 	log.Printf("Starting RPC server")
@@ -40,6 +47,7 @@ func NewServerRPC(callback ServerCallback) Server {
 	return server
 }
 
+// Establishes a connection to the metaserver.
 func (server *ServerRPC) connect() bool {
 	// Open connection to metaserver
 	connection, err := net.DialTimeout("tcp", "localhost:7399", time.Duration(10)*time.Second)
@@ -52,10 +60,13 @@ func (server *ServerRPC) connect() bool {
 	return true
 }
 
+// CloseConnection terminates the connection to the metaserver.
 func (server *ServerRPC) CloseConnection() {
 	server.listener.Close()
 }
 
+// Calls a method on the rpc client.
+// (Re-)Connects to the client if currently not connected or the connection is broken.
 func (server *ServerRPC) callClientMethod(action, gameName string) {
 	if server.client == nil {
 		// Probably there never was a connection, try to create one now
@@ -86,15 +97,19 @@ func (server *ServerRPC) callClientMethod(action, gameName string) {
 
 }
 
+// GameConnected informs the metaserver that a host connected to a game.
 func (server *ServerRPC) GameConnected(name string) {
 	// Tell the metaserver about it
 	server.callClientMethod("GameConnected", name)
 }
 
+// GameClosed informs the metaserver that a game has ended.
 func (server *ServerRPC) GameClosed(name string) {
 	server.callClientMethod("GameClosed", name)
 }
 
+// NewGame is called by the rpc server when the metaserver wants to start a new game.
+// Calls the respective method of the ServerCallback given on construction.
 func (serverM *ServerRPCMethods) NewGame(in *GameData, success *bool) error {
 	ret := serverM.server.callback.CreateGame(in.Name, in.Password)
 	if ret != true {
