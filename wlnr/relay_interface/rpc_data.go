@@ -1,6 +1,6 @@
-package rpc_data
+package relay_interface
 
-type NewGameData struct {
+type GameData struct {
 	Name     string
 	Password string
 }
@@ -10,14 +10,14 @@ Passed Messages:
 
 Precondition: Client is registered on the WLMS and not in any game
 
-WLMS			WLNR			Client
-	<------ OPEN_GAME (name) ------------------
-    - OPEN_GAME (name, nonce) -->
+WLMS					WLNR			Client
+	<-------------- OPEN_GAME (name) -----------------------
+ - ServerRPCMethod.NewGame (name, response) -->
  *announce game as closed*
 			*open game*
-	-------- OPENED_GAME (ip) ---------------->
-	                  <- CONNECT (name,nonce) -
-  <- GAME_CONNECTED (name) -
+	-------- OPENED_GAME (ip, challenge) ---------------->
+		                  <- CONNECT (name, response) -
+  <- ClientRPCMethod.GameConnected (name) -
 
  *announce game as open*
 						* setup game *
@@ -29,4 +29,5 @@ WLMS			WLNR			Client
  *no longer list game*
 			<- DISCONNECT () ---------
 			*close game*
+ <- ClientRPCMethod.GameClosed (name) -
 */
