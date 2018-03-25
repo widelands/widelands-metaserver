@@ -40,7 +40,7 @@ func NewServerRPC(callback ServerCallback) Server {
 	rpc.Register(serverMethods)
 	l, e := net.Listen("tcp", ":7398")
 	if e != nil {
-		log.Fatal("Unable to listen on rpc port: ", e)
+		log.Printf("Unable to listen on rpc port: ", e)
 	}
 	server.listener = l
 	go rpc.Accept(l)
@@ -52,7 +52,7 @@ func (server *ServerRPC) connect() bool {
 	// Open connection to metaserver
 	connection, err := net.DialTimeout("tcp", "localhost:7399", time.Duration(10)*time.Second)
 	if err != nil {
-		log.Fatal("ServerRPC: Unable to connect to metaserver at localhost: ", err)
+		log.Printf("ServerRPC: Unable to connect to metaserver at localhost: ", err)
 		return false
 	}
 	server.client = rpc.NewClient(connection)
