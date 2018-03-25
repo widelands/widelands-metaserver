@@ -40,47 +40,66 @@ func NewServerRPC(callback ServerCallback) Server {
 	return server
 }
 
+func (server *ServerRPC) connect() bool {
+	// Open connection to metaserver
+	connection, err := net.DialTimeout("tcp", "localhost:7399", time.Duration(10)*time.Second)
+	if err != nil {
+		log.Fatal("ServerRPC: Unable to connect to metaserver at localhost: ", err)
+		return false
+	}
+	server.client = rpc.NewClient(connection)
+	log.Println("ServerRPC: Connected to metaserver")
+	return true
+}
+
 func (server *ServerRPC) CloseConnection() {
 	server.listener.Close()
 }
 
-func (serverM *ServerRPCMethods) NewGame(in *GameData, success *bool) error {
-	log.Printf("NewGame called")
-	// The metaserver wants something from us. Try to connect to it, too
-	if serverM.server.client == nil {
-		connection, err := net.DialTimeout("tcp", "localhost:7399", time.Duration(10)*time.Second)
+func (server *ServerRPC) callClientMethod(action, gameName string) {
+	if server.client == nil {
+		// Probably there never was a connection, try to create one now
+		// Isn't done in the constructor since we have a circular dependency between
+		// relay and metaserver
+		server.connect()
+	}
+	var ignored bool
+	data := GameData{
+		Name: gameName,
+	}
+	for i := 0; i < 2; i++ {
+		err := server.client.Call("ClientRPCMethods."+action, data, &ignored)
 		if err == nil {
-			serverM.server.client = rpc.NewClient(connection)
+			break
+		}
+		if err == rpc.ErrShutdown {
+			if !server.connect() {
+				log.Printf("ServerRPC: Lost connection to metaserver and are unable to reconnect")
+				return
+			}
+			log.Printf("ServerRPC: Lost connection to metaserver but was able to reconnect")
+		} else {
+			log.Printf("ServerRPC  error: %v", err)
+			return
 		}
 	}
 
+}
+
+func (server *ServerRPC) GameConnected(name string) {
+	// Tell the metaserver about it
+	server.callClientMethod("GameConnected", name)
+}
+
+func (server *ServerRPC) GameClosed(name string) {
+	server.callClientMethod("GameClosed", name)
+}
+
+func (serverM *ServerRPCMethods) NewGame(in *GameData, success *bool) error {
 	ret := serverM.server.callback.CreateGame(in.Name, in.Password)
 	if ret != true {
 		return errors.New("Game already exists")
 	}
 	*success = true
 	return nil
-}
-
-func (server *ServerRPC) GameConnected(name string) {
-	if server.client == nil {
-		return
-	}
-	// Tell the metaserver about it
-	var ignored bool
-	data := GameData{
-		Name: name,
-	}
-	server.client.Call("ClientRPCMethods.GameConnected", data, &ignored)
-}
-
-func (server *ServerRPC) GameClosed(name string) {
-	if server.client == nil {
-		return
-	}
-	var ignored bool
-	data := GameData{
-		Name: name,
-	}
-	server.client.Call("ClientRPCMethods.GameClosed", data, &ignored)
 }
