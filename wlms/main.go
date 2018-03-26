@@ -8,8 +8,8 @@ import (
 )
 
 type Config struct {
-	Database, User, Password, Table, Backend, IRCServer, Nickname, Realname, Channel string
-	UseTLS                                                                           bool
+	Database, User, Password, Table, Backend, IRCServer, Nickname, Realname, Channel, Hostname string
+	UseTLS                                                                                     bool
 }
 
 func (l *Config) ConfigFrom(path string) error {
@@ -27,6 +27,7 @@ func main() {
 
 	var db UserDb
 	var ircbridge IRCBridger
+	hostname := "localhost"
 	if config != "" {
 		log.Println("Loading configuration")
 		var cfg Config
@@ -39,16 +40,19 @@ func main() {
 			db = NewInMemoryDb()
 		}
 		ircbridge = NewIRCBridge(cfg.IRCServer, cfg.Realname, cfg.Nickname, cfg.Channel, cfg.UseTLS)
+
+		if cfg.Hostname != "" {
+			hostname = cfg.Hostname
+		}
 	} else {
 		log.Println("No configuration found, using in-memory database")
 		db = NewInMemoryDb()
 	}
 	defer db.Close()
-
 	channels := NewIRCBridgerChannels()
 	if ircbridge != nil {
 		ircbridge.Connect(channels)
 	}
-	RunServer(db, channels)
+	RunServer(db, channels, hostname)
 
 }

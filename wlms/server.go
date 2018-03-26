@@ -159,6 +159,16 @@ func (s Server) HasClient(name string) *Client {
 	return nil
 }
 
+func (s Server) HasIRCClient(name string) *Client {
+	for e := s.clients.Front(); e != nil; e = e.Next() {
+		client := e.Value.(*Client)
+		if client.Name() == name && client.buildId == "IRC" {
+			return client
+		}
+	}
+	return nil
+}
+
 func (s Server) FindClientsToReplace(nonce string, name string) []*Client {
 	res := make([]*Client, 0)
 	var best *Client = nil
@@ -271,8 +281,7 @@ func (s Server) BroadcastToIrc(message string) {
 	}
 
 }
-
-func RunServer(db UserDb, irc *IRCBridgerChannels) {
+func RunServer(db UserDb, irc *IRCBridgerChannels, hostname string) {
 	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {
 		log.Fatal(err)
@@ -290,7 +299,7 @@ func RunServer(db UserDb, irc *IRCBridgerChannels) {
 		}
 	}()
 
-	server := CreateServerUsing(C, db, irc)
+	server := CreateServerUsing(C, db, irc, hostname)
 
 	server.WaitTillShutdown()
 }
@@ -369,7 +378,7 @@ func (server *Server) GetRelayAddresses() AddressPair {
 	return server.relay_address
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, irc *IRCBridgerChannels) *Server {
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, irc *IRCBridgerChannels, hostname string) *Server {
 	server := &Server{
 		acceptedConnections:    acceptedConnections,
 		shutdownServer:         make(chan bool),
@@ -386,10 +395,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		relay_address:          AddressPair{"", ""},
 	}
 	// Get the IP addresses of our domain
-	// TODO(sirver): This should be configurable for testing. For now you need
-	// to put 'localhost' here if you want to test Widelands locally against the
-	// metaserver + relay.
-	ips, err := net.LookupIP("widelands.org")
+	ips, err := net.LookupIP(hostname)
 	if err != nil {
 		log.Fatal("Failed to resolve own hostname")
 		return nil
@@ -417,11 +423,17 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 			case m := <-irc.messagesFromIRC:
 				server.BroadcastToConnectedClients("CHAT", m.nick, m.message, "public")
 			case nick := <-irc.clientsJoiningIRC:
+				old_client := server.HasIRCClient(nick)
+				if old_client != nil {
+					// Should not happen
+					log.Printf("Warning: Told to add IRC client %v which is already listed", nick)
+					break
+				}
 				client := NewIRCClient(nick)
 				server.AddClient(client)
 				server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 			case nick := <-irc.clientsLeavingIRC:
-				client := server.HasClient(nick)
+				client := server.HasIRCClient(nick)
 				if client != nil {
 					server.RemoveClient(client)
 					server.BroadcastToConnectedClients("CLIENTS_UPDATE")
