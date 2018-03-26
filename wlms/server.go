@@ -296,7 +296,7 @@ func (rpc *ServerRPC) GameClosed(in *rpc_data.NewGameData, response *bool) (err 
 
 // End mini RPC class
 
-func RunServer(db UserDb, irc *IRCBridgerChannels) {
+func RunServer(db UserDb, irc *IRCBridgerChannels, hostname string) {
 	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {
 		log.Fatal(err)
@@ -331,7 +331,7 @@ func RunServer(db UserDb, irc *IRCBridgerChannels) {
 		}
 	}()
 
-	server := CreateServerUsing(C, db, irc, relay)
+	server := CreateServerUsing(C, db, irc, relay, hostname)
 
 	// Run our rpc server
 	rpc.Register(NewServerRPC(server))
@@ -422,7 +422,7 @@ func (server *Server) GetRelayAddresses() AddressPair {
 	return server.relay_address
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, irc *IRCBridgerChannels, relay *rpc.Client) *Server {
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, irc *IRCBridgerChannels, relay *rpc.Client, hostname string) *Server {
 	server := &Server{
 		acceptedConnections:    acceptedConnections,
 		shutdownServer:         make(chan bool),
@@ -440,10 +440,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		relay_address:          AddressPair{"", ""},
 	}
 	// Get the IP addresses of our domain
-	// TODO(sirver): This should be configurable for testing. For now you need
-	// to put 'localhost' here if you want to test Widelands locally against the
-	// metaserver + relay.
-	ips, err := net.LookupIP("widelands.org")
+	ips, err := net.LookupIP(hostname)
 	if err != nil {
 		log.Fatal("Failed to resolve own hostname")
 		return nil
