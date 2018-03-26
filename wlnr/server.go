@@ -2,11 +2,9 @@ package main
 
 import (
 	"container/list"
-	"github.com/widelands/widelands_metaserver/wlnr/rpc_data"
+	"github.com/widelands/widelands_metaserver/wlnr/relayinterface"
 	"log"
 	"net"
-	"net/rpc"
-	"time"
 )
 
 type Server struct {
@@ -14,7 +12,7 @@ type Server struct {
 	shutdownServer      chan bool
 	serverHasShutdown   chan bool
 	games               *list.List
-	wlms                *rpc.Client
+	wlms                relayinterface.Server
 }
 
 func (s *Server) InitiateShutdown() error {
@@ -27,18 +25,12 @@ func (s *Server) WaitTillShutdown() {
 }
 
 func (s *Server) CreateGame(name, password string) bool {
-	// The metaserver wants something from us. Try to connect to it, too
-	if s.wlms == nil {
-		connection, err := net.DialTimeout("tcp", "127.0.0.1:7399", time.Duration(10)*time.Second)
-		if err != nil {
-			return false
-		}
-		s.wlms = rpc.NewClient(connection)
-	}
+
 	// Check if the game already exists
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		game := e.Value.(*Game)
 		if game.Name() == name {
+			log.Printf("Error: Ordered to create game '%v', but it already exists", name)
 			return false
 		}
 	}
@@ -50,12 +42,7 @@ func (s *Server) CreateGame(name, password string) bool {
 }
 
 func (s *Server) GameConnected(name string) {
-	// Tell the metaserver about it
-	var ignored bool
-	data := rpc_data.NewGameData{
-		Name: name,
-	}
-	s.wlms.Call("ServerRPC.GameConnected", data, &ignored)
+	s.wlms.GameConnected(name)
 }
 
 // Search for a game with the given name. If it exists but no host is connected, remove it
@@ -64,11 +51,7 @@ func (s *Server) RemoveGameIfNoHostIsConnected(name string) {
 		g := e.Value.(*Game)
 		if g.Name() == name && g.host == nil {
 			log.Printf("Removing game %v since no host connected to it", name)
-			var ignored bool
-			data := rpc_data.NewGameData{
-				Name: name,
-			}
-			s.wlms.Call("ServerRPC.GameClosed", data, &ignored)
+			s.wlms.GameClosed(name)
 			s.games.Remove(e)
 			return
 		}
@@ -78,11 +61,7 @@ func (s *Server) RemoveGameIfNoHostIsConnected(name string) {
 func (s *Server) RemoveGame(game *Game) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Game) == game {
-			var ignored bool
-			data := rpc_data.NewGameData{
-				Name: game.Name(),
-			}
-			s.wlms.Call("ServerRPC.GameClosed", data, &ignored)
+			s.wlms.GameClosed(game.Name())
 			s.games.Remove(e)
 			return
 		}
@@ -115,18 +94,10 @@ func RunServer() {
 		games:               list.New(),
 		wlms:                nil,
 	}
+	server.wlms = relayinterface.NewServerRPC(server)
+	defer server.wlms.CloseConnection()
 
 	go server.mainLoop()
-
-	// Start rpc server so the metaserver can tell us about new games
-	log.Printf("Starting RPC server")
-	rpc.Register(NewRelayRPC(server))
-	l, e := net.Listen("tcp", ":7398")
-	if e != nil {
-		log.Fatal("Unable to listen on rpc port: ", e)
-	}
-	defer l.Close()
-	go rpc.Accept(l)
 
 	log.Println("The client ids are only unique within one game. Id=1 is host")
 

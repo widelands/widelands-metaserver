@@ -2,11 +2,10 @@ package main
 
 import (
 	"container/list"
-	"github.com/widelands/widelands_metaserver/wlnr/rpc_data"
+	"github.com/widelands/widelands_metaserver/wlnr/relayinterface"
 	"io"
 	"log"
 	"net"
-	"net/rpc"
 	"time"
 )
 
@@ -37,7 +36,7 @@ type Server struct {
 	clientForgetTimeout time.Duration
 	gamePingerFactory   GamePingerFactory
 	irc                 *IRCBridgerChannels
-	relay               *rpc.Client
+	relay               relayinterface.Client
 	// The IP addresses of the wlnr instance
 	relay_address AddressPair
 }
@@ -282,53 +281,12 @@ func (s Server) BroadcastToIrc(message string) {
 	}
 
 }
-
-// Mini class for RPC to receive messages
-type ServerRPC struct {
-	server *Server
-}
-
-func NewServerRPC(server *Server) *ServerRPC {
-	return &ServerRPC{
-		server: server,
-	}
-}
-
-func (rpc *ServerRPC) GameConnected(in *rpc_data.NewGameData, response *bool) (err error) {
-	rpc.server.RelayGameConnected(in.Name)
-	return nil
-}
-
-func (rpc *ServerRPC) GameClosed(in *rpc_data.NewGameData, response *bool) (err error) {
-	rpc.server.RelayGameClosed(in.Name)
-	return nil
-}
-
-// End mini RPC class
-
 func RunServer(db UserDb, irc *IRCBridgerChannels, hostname string) {
 	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer ln.Close()
-
-	// Open connection to relay server
-	connection, err := net.DialTimeout("tcp", "127.0.0.1:7398", time.Duration(10)*time.Second)
-	if err != nil {
-		log.Fatal("Unable to connect to relay server: ", err)
-		return
-	}
-	relay := rpc.NewClient(connection)
-	log.Println("Connected to relay server")
-
-	// Open our rpc server
-	rpcLn, err := net.Listen("tcp", ":7399")
-	if err != nil {
-		log.Fatal("Error when listening for RPC calls: ", err)
-		return
-	}
-	defer rpcLn.Close()
 
 	C := make(chan ReadWriteCloserWithIp)
 	go func() {
@@ -341,11 +299,7 @@ func RunServer(db UserDb, irc *IRCBridgerChannels, hostname string) {
 		}
 	}()
 
-	server := CreateServerUsing(C, db, irc, relay, hostname)
-
-	// Run our rpc server
-	rpc.Register(NewServerRPC(server))
-	go rpc.Accept(rpcLn)
+	server := CreateServerUsing(C, db, irc, hostname)
 
 	server.WaitTillShutdown()
 }
@@ -389,25 +343,17 @@ func (server *Server) InjectGamePingerFactory(gpf GamePingerFactory) {
 	server.gamePingerFactory = gpf
 }
 
-// Tells the relay server to start a game with the given name
-// The host position in the game is protected by the given password
-func (server *Server) RelayCreateGame(name string, hostPassword string) bool {
-	// Tell relay to host game
-	var success bool
-	data := rpc_data.NewGameData{
-		Name:     name,
-		Password: hostPassword,
-	}
-	err := server.relay.Call("RelayRPC.NewGame", data, &success)
-	if err != nil || success == false {
+func (server *Server) RelayCreateGame(name string, password string) bool {
+	if !server.relay.CreateGame(name, password) {
 		log.Println("ERROR: Unable to create a game on the relay server. This should not happen")
 		return false
+	} else {
+		return true
 	}
-	return true
 }
 
 // The relay informs us that the game with the given name has been connected by the host
-func (server *Server) RelayGameConnected(name string) {
+func (server *Server) GameConnected(name string) {
 	log.Printf("Relay notifies us that the host connected to its game '%s'", name)
 	game := server.HasGame(name)
 	if game == nil {
@@ -418,7 +364,7 @@ func (server *Server) RelayGameConnected(name string) {
 }
 
 // The relay informs us that the game with the given name has been closed
-func (server *Server) RelayGameClosed(name string) {
+func (server *Server) GameClosed(name string) {
 	log.Printf("Relay notifies us that the game '%s' has been closed", name)
 	game := server.HasGame(name)
 	if game == nil {
@@ -432,7 +378,7 @@ func (server *Server) GetRelayAddresses() AddressPair {
 	return server.relay_address
 }
 
-func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, irc *IRCBridgerChannels, relay *rpc.Client, hostname string) *Server {
+func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb, irc *IRCBridgerChannels, hostname string) *Server {
 	server := &Server{
 		acceptedConnections:    acceptedConnections,
 		shutdownServer:         make(chan bool),
@@ -446,7 +392,6 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		clientSendingTimeout:   time.Minute * 2,
 		clientForgetTimeout:    time.Minute * 5,
 		irc:                    irc,
-		relay:                  relay,
 		relay_address:          AddressPair{"", ""},
 	}
 	// Get the IP addresses of our domain
@@ -468,6 +413,9 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		log.Fatal("Could not get an IPv4 and an IPv6 address for own host")
 		return nil
 	}
+
+	server.relay = relayinterface.NewClientRPC(server)
+
 	server.gamePingerFactory = RealGamePingerFactory{server}
 	go func() {
 		for {
@@ -498,6 +446,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 }
 
 func (s *Server) mainLoop() {
+	defer s.relay.CloseConnection()
 	for {
 		select {
 		case conn, ok := <-s.acceptedConnections:
