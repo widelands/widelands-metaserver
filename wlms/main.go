@@ -22,7 +22,9 @@ func (l *Config) ConfigFrom(path string) error {
 
 func main() {
 	var config string
-	flag.StringVar(&config, "config", "", "Database configuration file to read.")
+	var testuser bool
+	flag.StringVar(&config, "config", "", "Configuration file to read.")
+	flag.BoolVar(&testuser, "testuser", false, "Create a \"testuser\" with password \"test\" on startup. Only works with memory user database.")
 	flag.Parse()
 
 	var db UserDb
@@ -47,6 +49,11 @@ func main() {
 	} else {
 		log.Println("No configuration found, using in-memory database")
 		db = NewInMemoryDb()
+	}
+	mdb, ok := db.(*InMemoryUserDb)
+	if ok && testuser {
+		log.Println("Creating testuser in memory user database")
+		mdb.AddUser("testuser", "test", REGISTERED)
 	}
 	defer db.Close()
 	channels := NewIRCBridgerChannels()
