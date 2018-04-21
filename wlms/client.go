@@ -682,14 +682,13 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 
 	log.Printf("Client %v joined game '%v'", client.userName, game.Name())
 	if client.protocolVersion == 0 {
-		// Legacy client: Send the IPv4 address, which is the only one the client has
-		host := server.HasClient(game.Host())
-		if host == nil {
+		if game.UsesRelay() {
 			// Should never happen. The game should be a legacy game,
 			// since the client only sees those as open
-			client.SendPacket("ERROR", "GAME_CONNECT", "INVALID_GAME")
-			client.Disconnect(*server)
+			return CmdPacketError{"NO_SUCH_GAME"}
 		}
+		// Legacy client: Send the IPv4 address, which is the only one the client has
+		host := server.HasClient(game.Host())
 		client.SendPacket("GAME_CONNECT", host.remoteIp())
 	} else {
 		// Newer client which possibly supports two IPs and uses the relay
