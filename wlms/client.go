@@ -848,7 +848,7 @@ func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdErro
 			}
 		})
 	}
-	data := make([]interface{}, 2+nrClients*5)
+	data := make([]interface{}, 2+nrClients*4)
 
 	data[0] = "CLIENTS"
 	data[1] = nrClients
@@ -865,8 +865,7 @@ func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdErro
 			data[n+2] = ""
 		}
 		data[n+3] = otherClient.permissions.String()
-		data[n+4] = ""
-		n += 5
+		n += 4
 	})
 	client.SendPacket(data...)
 	return nil
