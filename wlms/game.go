@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"net"
 	"time"
 )
 
@@ -11,9 +10,7 @@ type GameState int
 const (
 	INITIAL_SETUP GameState = iota
 	NOT_CONNECTABLE
-	CONNECTABLE_V4
-	CONNECTABLE_V6
-	CONNECTABLE_BOTH
+	CONNECTABLE
 	RUNNING
 )
 
@@ -23,12 +20,8 @@ func (g GameState) String() string {
 		return "INITIAL_SETUP"
 	case NOT_CONNECTABLE:
 		return "NOT_CONNECTABLE"
-	case CONNECTABLE_V4:
-		return "CONNECTABLE_V4"
-	case CONNECTABLE_V6:
-		return "CONNECTABLE_V6"
-	case CONNECTABLE_BOTH:
-		return "CONNECTABLE_BOTH"
+	case CONNECTABLE:
+		return "CONNECTABLE"
 	case RUNNING:
 		return "RUNNING"
 	default:
@@ -39,12 +32,12 @@ func (g GameState) String() string {
 
 type Game struct {
 	// The host is also listed in players.
-	host       string
-	players    map[string]bool
-	name       string
-	buildId    string
-	state      GameState
-	usesRelay  bool // True if all network traffic passes through our relay server.
+	host      string
+	players   map[string]bool
+	name      string
+	buildId   string
+	state     GameState
+	usesRelay bool // True if all network traffic passes through our relay server.
 }
 
 type GamePinger struct {
@@ -55,27 +48,12 @@ func (game *Game) doPing(server *Server, host string, pingTimeout time.Duration)
 	pinger := server.NewGamePinger(host, pingTimeout)
 	success, ok := <-pinger.C
 	result := success && ok
-	state_to_check := CONNECTABLE_V4
-	if net.ParseIP(host).To4() == nil {
-		// If it isn't a IPv4 address, it must be a IPv6 address
-		state_to_check = CONNECTABLE_V6
-	}
 
 	if result {
 		switch game.state {
-		case INITIAL_SETUP:
-			game.SetState(*server, state_to_check)
-		case NOT_CONNECTABLE:
-			game.SetState(*server, state_to_check)
-		case CONNECTABLE_V4:
-			if state_to_check == CONNECTABLE_V6 {
-				game.SetState(*server, CONNECTABLE_BOTH)
-			}
-		case CONNECTABLE_V6:
-			if state_to_check == CONNECTABLE_V4 {
-				game.SetState(*server, CONNECTABLE_BOTH)
-			}
-		case CONNECTABLE_BOTH, RUNNING:
+		case INITIAL_SETUP, NOT_CONNECTABLE:
+			game.SetState(*server, CONNECTABLE)
+		case CONNECTABLE, RUNNING:
 			// Do nothing
 		default:
 			log.Fatalf("Unhandled game.state: %v", game.state)
@@ -86,20 +64,8 @@ func (game *Game) doPing(server *Server, host string, pingTimeout time.Duration)
 			game.SetState(*server, NOT_CONNECTABLE)
 		case NOT_CONNECTABLE:
 			// Do nothing.
-		case CONNECTABLE_V4:
-			if state_to_check == CONNECTABLE_V4 {
-				game.SetState(*server, NOT_CONNECTABLE)
-			}
-		case CONNECTABLE_V6:
-			if state_to_check == CONNECTABLE_V6 {
-				game.SetState(*server, NOT_CONNECTABLE)
-			}
-		case CONNECTABLE_BOTH:
-			if state_to_check == CONNECTABLE_V4 {
-				game.SetState(*server, CONNECTABLE_V6)
-			} else {
-				game.SetState(*server, CONNECTABLE_V4)
-			}
+		case CONNECTABLE:
+			game.SetState(*server, NOT_CONNECTABLE)
 		case RUNNING:
 			// Do nothing
 		default:
@@ -115,8 +81,8 @@ func (game *Game) pingCycle(server *Server) {
 		defer server.RemoveGame(game)
 	}
 
+	pingTimeout := server.GameInitialPingTimeout()
 	first_ping := true
-	ping_primary_ip := true
 	for {
 		// This game is not even in our list anymore. Give up. If the game has no
 		// host anymore or it has disconnected, remove the game.
@@ -127,23 +93,8 @@ func (game *Game) pingCycle(server *Server) {
 		if host == nil {
 			return
 		}
-		pingTimeout := server.GamePingTimeout()
-		if first_ping {
-			pingTimeout = server.GameInitialPingTimeout()
-		}
 
-		connected := false
-
-		// The idea is to alternate between pinging the two IP addresses of the client, except for the
-		// first round or if there is only one IP address
-		if ping_primary_ip || host.otherIp() == "" {
-			// Primary IP
-			connected = game.doPing(server, host.remoteIp(), pingTimeout)
-		}
-		if (!ping_primary_ip || first_ping) && host.otherIp() != "" {
-			// Secondary IP
-			connected = game.doPing(server, host.otherIp(), pingTimeout) || connected
-		}
+		connected := game.doPing(server, host.remoteIp(), pingTimeout)
 		if first_ping {
 			// On first ping, inform the client about the result
 			if connected {
@@ -154,19 +105,19 @@ func (game *Game) pingCycle(server *Server) {
 			first_ping = false
 		}
 
-		ping_primary_ip = !ping_primary_ip
+		pingTimeout = server.GamePingTimeout()
 		time.Sleep(server.GamePingTimeout())
 	}
 }
 
 func NewGame(host string, buildId string, server *Server, gameName string, shouldUseRelay bool) *Game {
 	game := &Game{
-		players:    make(map[string]bool),
-		host:       host,
-		buildId:    buildId,
-		name:       gameName,
-		state:      INITIAL_SETUP,
-		usesRelay:  shouldUseRelay,
+		players:   make(map[string]bool),
+		host:      host,
+		buildId:   buildId,
+		name:      gameName,
+		state:     INITIAL_SETUP,
+		usesRelay: shouldUseRelay,
 	}
 	server.AddGame(game)
 

@@ -360,7 +360,7 @@ func (server *Server) GameConnected(name string) {
 		log.Printf(" Game '%s' is unknown, might already been closed", name)
 		return
 	}
-	game.SetState(*server, CONNECTABLE_BOTH)
+	game.SetState(*server, CONNECTABLE)
 }
 
 // The relay informs us that the game with the given name has been closed
@@ -413,6 +413,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		log.Fatal("Could not get an IPv4 and an IPv6 address for own host")
 		return nil
 	}
+	log.Printf("Using %v and %v as IP addresses of the relay", server.relay_address.ipv4, server.relay_address.ipv6)
 
 	server.relay = relayinterface.NewClientRPC(server)
 
