@@ -16,6 +16,7 @@ const (
 	UNREGISTERED Permissions = iota
 	REGISTERED
 	SUPERUSER
+	IRC
 )
 
 func (p Permissions) String() string {
@@ -26,6 +27,9 @@ func (p Permissions) String() string {
 		return "REGISTERED"
 	case SUPERUSER:
 		return "SUPERUSER"
+	case IRC:
+		return "IRC"
+
 	default:
 		log.Fatalf("Unknown Permissions: %d", p)
 	}
@@ -301,7 +305,7 @@ func newClient(r ReadWriteCloserWithIp) *Client {
 func NewIRCClient(nick string) *Client {
 	client := &Client{
 		state:       CONNECTED,
-		permissions: UNREGISTERED,
+		permissions: IRC,
 		userName:    nick,
 		buildId:     "IRC",
 		nonce:       "irc",
@@ -834,7 +838,7 @@ func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdErro
 		// Hide IRC users in the lobby of build19 clients. They would appear
 		// at the top of the player list, confusing the user
 		server.ForeachActiveClient(func(otherClient *Client) {
-			if otherClient.buildId != "IRC" {
+			if otherClient.permissions != IRC {
 				nrClients++
 			}
 		})
@@ -845,7 +849,7 @@ func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdErro
 	data[1] = nrClients
 	n := 2
 	server.ForeachActiveClient(func(otherClient *Client) {
-		if client.protocolVersion < 3 && otherClient.buildId == "IRC" {
+		if client.protocolVersion < 3 && otherClient.permissions == IRC {
 			return
 		}
 		data[n+0] = otherClient.userName
