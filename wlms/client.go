@@ -41,6 +41,13 @@ const (
 	RECENTLY_DISCONNECTED
 )
 
+// The protocol versions supported by the metaserver
+const (
+	BUILD19 int = 0
+	BUILD20     = 5
+	// TRUNK = 5
+)
+
 type Client struct {
 	// The connection (net.Conn most likely) that let us talk to the other site.
 	conn ReadWriteCloserWithIp
@@ -397,11 +404,11 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 	}
 
 	// Check protocol version
-	if c.protocolVersion != 0 && c.protocolVersion != 4 {
+	if c.protocolVersion != BUILD19 && c.protocolVersion != BUILD20 {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
 
-	if isRegisteredOnServer || c.protocolVersion >= 3 {
+	if isRegisteredOnServer || c.protocolVersion >= BUILD20 {
 		nonce, err := pkg.ReadString()
 		if err != nil {
 			return CriticalCmdPacketError{err.Error()}
@@ -414,7 +421,7 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 		if !server.UserDb().ContainsName(c.userName) {
 			return CriticalCmdPacketError{"WRONG_PASSWORD"}
 		}
-		if c.protocolVersion >= 4 {
+		if c.protocolVersion >= BUILD20 {
 			// Send a challenge for secure passwort transmission
 			c.sendChallenge(server)
 			return nil
@@ -553,7 +560,7 @@ func (c *Client) findUnconnectedName(server *Server) {
 		oldClient := server.HasClient(c.userName)
 		if oldClient == nil {
 			// Found a free name
-			if c.protocolVersion >= 4 {
+			if c.protocolVersion >= BUILD20 {
 				c.nonce = server.UserDb().GenerateDowngradedUserNonce(baseName, c.userName)
 			}
 			c.loginDone(server)
@@ -571,7 +578,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 		return CriticalCmdPacketError{err.Error()}
 	}
 
-	if isRegisteredOnServer || protocolVersion >= 3 {
+	if isRegisteredOnServer || protocolVersion >= BUILD20 {
 		n, err := pkg.ReadString()
 		if err != nil {
 			return CriticalCmdPacketError{err.Error()}
@@ -620,7 +627,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 
 func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdError {
 	var gameName string
-	if client.protocolVersion < 4 {
+	if client.protocolVersion == BUILD19 {
 		var maxPlayer int
 		if err := pkg.Unpack(&gameName, &maxPlayer); err != nil {
 			return CmdPacketError{err.Error()}
@@ -634,7 +641,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 		return CmdPacketError{"GAME_EXISTS"}
 	}
 
-	if client.protocolVersion < 1 {
+	if client.protocolVersion == BUILD19 {
 		// Client does not support the relay server. Let him host his game
 		log.Printf("Starting new game '%v' on computer of host %v", gameName, client.Name())
 		client.setGame(NewGame(client.userName, client.buildId, server, gameName, false /* do not use relay */), server)
@@ -681,7 +688,7 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 	}
 
 	log.Printf("Client %v joined game '%v'", client.userName, game.Name())
-	if client.protocolVersion == 0 {
+	if client.protocolVersion == BUILD19 {
 		if game.UsesRelay() {
 			// Should never happen. The game should be a legacy game,
 			// since the client only sees those as open
@@ -720,7 +727,7 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 
 func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdError {
 	var nrClients int = 0
-	if client.protocolVersion >= 3 {
+	if client.protocolVersion >= BUILD20 {
 		nrClients = server.NrActiveClients()
 	} else {
 		// Hide IRC users in the lobby of build19 clients. They would appear
@@ -737,7 +744,7 @@ func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdErro
 	data[1] = nrClients
 	n := 2
 	server.ForeachActiveClient(func(otherClient *Client) {
-		if client.protocolVersion < 3 && otherClient.buildId == "IRC" {
+		if client.protocolVersion == BUILD19 && otherClient.buildId == "IRC" {
 			return
 		}
 		data[n+0] = otherClient.userName
@@ -765,7 +772,6 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError 
 	server.ForeachGame(func(game *Game) {
 		data[n+0] = game.Name()
 		data[n+1] = game.BuildId()
-		data[n+2] = (client.protocolVersion == 0 && !game.UsesRelay() && game.State() == CONNECTABLE) || (client.protocolVersion >= 4 && game.UsesRelay())
 		n += 3
 	})
 	client.SendPacket(data...)
