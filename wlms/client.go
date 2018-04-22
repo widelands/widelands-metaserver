@@ -37,7 +37,6 @@ type State int
 
 const (
 	HANDSHAKE State = iota
-	TELL_IP
 	CONNECTED
 	RECENTLY_DISCONNECTED
 )
@@ -68,23 +67,12 @@ type Client struct {
 	buildId string
 
 	// The nonce to link multiple connections by the same client.
-	// When a network client connects with (RE)LOGIN he also sends a nonce
-	// which is stored in this field. When "another" netclient connects and
-	// sends TELL_IP containing the same nonce, it is considered the
-	// same game client connecting with another IP.
-	// This way, two connections by IPv4 and IPv6 can be matched so
-	// the server learns both addresses of the client.
-	// Another usage is to recognize a (re)connecting client and assign
-	// its old identity back to it.
+	// When a network client connects with LOGIN he also sends a nonce
+	// which is stored in this field. Later on it is used to recognize
+	// a (re)connecting client and assign its old identity back to it.
+	// For registered clients, the nonce is used as temporary storage
+	// for the challenge-response processes.
 	nonce string
-
-	// the IP of the secondary connection.
-	// usually this is an IPv4 address.
-	secondaryIp string
-
-	// Whether this client has a known IPv4/6 address.
-	hasV4 bool
-	hasV6 bool
 
 	// The game we are currently in. nil if not in game.
 	game *Game
@@ -120,8 +108,6 @@ func (c *Client) setState(s State, server Server) {
 		need_broadcast = c.state == CONNECTED
 	case CONNECTED:
 		need_broadcast = c.state == HANDSHAKE || c.state == RECENTLY_DISCONNECTED
-	case TELL_IP:
-		break
 	default:
 		log.Fatal("Unkown state in setState")
 	}
@@ -187,13 +173,6 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 	client.startToPingTimer.Reset(server.PingCycleTime())
 	client.timeoutTimer.Reset(server.ClientSendingTimeout())
 	client.waitingForPong = false
-
-	ip := net.ParseIP(client.remoteIp())
-	if ip.To4() != nil {
-		client.hasV4 = true
-	} else {
-		client.hasV6 = true
-	}
 
 	for {
 		select {
@@ -336,10 +315,6 @@ func (client Client) remoteIp() string {
 	return host
 }
 
-func (client Client) otherIp() string {
-	return client.secondaryIp
-}
-
 func (newClient *Client) successfulRelogin(server *Server, oldClient *Client) {
 	server.RemoveClient(oldClient)
 
@@ -479,8 +454,6 @@ func (c *Client) Handle_PWD_CHALLENGE(server *Server, pkg *packet.Packet) CmdErr
 		c.permissions = server.UserDb().Permissions(c.userName)
 		c.nonce = server.UserDb().GenerateDowngradedUserNonce(c.userName, c.userName)
 		return c.findReplaceCandidates(server, true)
-	case TELL_IP:
-		c.finishTellIp(server)
 	default:
 		c.SendPacket("ERROR", "PWD_CHALLENGE", "Invalid connection state")
 		c.Disconnect(*server)
@@ -645,55 +618,6 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 	return nil
 }
 
-func (client *Client) Handle_TELL_IP(server *Server, pkg *packet.Packet) CmdError {
-	if err := pkg.Unpack(&client.protocolVersion, &client.userName, &client.nonce); err != nil {
-		return CmdPacketError{err.Error()}
-	}
-
-	if client.protocolVersion != 4 {
-		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
-	}
-
-	old_client := server.HasClient(client.userName)
-	if old_client == nil || old_client.userName != client.userName || (old_client.nonce != client.nonce && old_client.permissions == UNREGISTERED) {
-		log.Printf("Someone failed to register an IP for client %v", old_client.Name())
-		return CriticalCmdPacketError{"NOT_LOGGED_IN"}
-	}
-
-	if old_client.permissions == REGISTERED {
-		// Registered user: Force password check
-		client.setState(TELL_IP, *server)
-		client.sendChallenge(server)
-		return nil
-	}
-
-	// Unregistered user. Check nonce and replace the entry
-	client.finishTellIp(server)
-	return nil
-}
-
-func (client *Client) finishTellIp(server *Server) {
-	// We found the existing connection of this client.
-	// Update his IP and close this connection.
-	old_client := server.HasClient(client.userName)
-	if old_client == nil {
-		// Hm. Must have disconnected in the last seconds. Abort.
-		return
-	}
-	old_client.secondaryIp = client.remoteIp()
-	ip := net.ParseIP(old_client.otherIp())
-	if ip.To4() != nil {
-		old_client.hasV4 = true
-	} else {
-		old_client.hasV6 = true
-	}
-	log.Printf("Client %v is now known to use %v and %v", old_client.Name(), old_client.remoteIp(), old_client.otherIp())
-	client.Disconnect(*server)
-	// Tell the client to get a new list of games. The availability of games might have changed now that
-	// he supports more IP versions
-	old_client.SendPacket("GAMES_UPDATE")
-}
-
 func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdError {
 	var gameName string
 	if client.protocolVersion < 4 {
@@ -737,13 +661,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 		}
 		game := NewGame(client.userName, client.buildId, server, gameName, true /* use relay */)
 		ips := server.GetRelayAddresses()
-		if client.hasV4 && client.hasV6 {
-			client.SendPacket("GAME_OPEN", challenge, ips.ipv6, true, ips.ipv4)
-		} else if client.hasV4 {
-			client.SendPacket("GAME_OPEN", challenge, ips.ipv4, false)
-		} else if client.hasV6 {
-			client.SendPacket("GAME_OPEN", challenge, ips.ipv6, false)
-		}
+		client.SendPacket("GAME_OPEN", challenge, ips.ipv6, true, ips.ipv4)
 		client.setGame(game, server)
 	}
 
@@ -763,48 +681,22 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 	}
 
 	log.Printf("Client %v joined game '%v'", client.userName, game.Name())
-	client.sendGameIPs("GAME_CONNECT", game, server)
+	if client.protocolVersion == 0 {
+		if game.UsesRelay() {
+			// Should never happen. The game should be a legacy game,
+			// since the client only sees those as open
+			return CmdPacketError{"NO_SUCH_GAME"}
+		}
+		// Legacy client: Send the IPv4 address, which is the only one the client has
+		host := server.HasClient(game.Host())
+		client.SendPacket("GAME_CONNECT", host.remoteIp())
+	} else {
+		// Newer client which possibly supports two IPs and uses the relay
+		ips := server.GetRelayAddresses()
+		client.SendPacket("GAME_CONNECT", ips.ipv6, true, ips.ipv4)
+	}
 	client.setGame(game, server)
 	return nil
-}
-
-func (client *Client) sendGameIPs(message string, game *Game, server *Server) {
-
-	var ips AddressPair
-	if game.UsesRelay() {
-		// Game is using the relay
-		ips = server.GetRelayAddresses()
-	} else {
-		host := server.HasClient(game.Host())
-		ip := net.ParseIP(host.remoteIp())
-		if ip.To4() != nil {
-			ips.ipv4 = host.remoteIp()
-			ips.ipv6 = host.otherIp()
-		} else {
-			ips.ipv4 = host.otherIp()
-			ips.ipv6 = host.remoteIp()
-		}
-	}
-	if client.protocolVersion == 0 {
-		// Legacy client: Send the IPv4 address
-		client.SendPacket(message, ips.ipv4)
-		// One of the two has to be IPv4, otherwise the client wouldn't come this
-		// far anyway (game would appear closed)
-	} else {
-		// Newer client which supports two IPs
-		// Only send him the IPs he can deal with
-		if client.hasV4 && client.hasV6 && game.State() == CONNECTABLE_BOTH {
-			// Both client and server have both IPs
-			client.SendPacket(message, ips.ipv6, true, ips.ipv4)
-		} else if client.hasV4 && (game.State() == CONNECTABLE_V4 || game.State() == CONNECTABLE_BOTH) {
-			// Client and server have an IPv4 address
-			client.SendPacket(message, ips.ipv4, false)
-		} else if client.hasV6 && (game.State() == CONNECTABLE_V6 || game.State() == CONNECTABLE_BOTH) {
-			// Client and server have an IPv6 address
-			client.SendPacket(message, ips.ipv6, false)
-		} else {
-		}
-	}
 }
 
 func (client *Client) Handle_GAME_START(server *Server, pkg *packet.Packet) CmdError {
@@ -873,15 +765,7 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError 
 	server.ForeachGame(func(game *Game) {
 		data[n+0] = game.Name()
 		data[n+1] = game.BuildId()
-		// A game is connectable when the client supports the IP version of the game
-		// (and the game is connectable itself, of course)
-		connectable := game.State() == CONNECTABLE_BOTH
-		if client.hasV4 && game.State() == CONNECTABLE_V4 {
-			connectable = true
-		} else if client.hasV6 && game.State() == CONNECTABLE_V6 {
-			connectable = true
-		}
-		data[n+2] = connectable
+		data[n+2] = (client.protocolVersion == 0 && !game.UsesRelay() && game.State() == CONNECTABLE) || (client.protocolVersion >= 4 && game.UsesRelay())
 		n += 3
 	})
 	client.SendPacket(data...)
