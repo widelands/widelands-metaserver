@@ -772,6 +772,20 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError 
 	server.ForeachGame(func(game *Game) {
 		data[n+0] = game.Name()
 		data[n+1] = game.BuildId()
+		if client.protocolVersion == BUILD19 {
+			data[n+2] = !game.UsesRelay() && game.State() == CONNECTABLE
+		} else {
+			if !game.UsesRelay() {
+				data[n+2] = "CLOSED"
+			} else if game.State() == CONNECTABLE {
+				data[n+2] = "SETUP"
+			} else if game.State() == RUNNING {
+				data[n+2] = "RUNNING"
+			} else {
+				// For half a second before the host connects to the relay
+				data[n+2] = "CLOSED"
+			}
+		}
 		n += 3
 	})
 	client.SendPacket(data...)
