@@ -837,6 +837,7 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 
 func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdError {
 	var nrClients int = 0
+	nFields := 4
 	if client.protocolVersion >= 3 {
 		nrClients = server.NrActiveClients()
 	} else {
@@ -847,8 +848,9 @@ func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdErro
 				nrClients++
 			}
 		})
+		nFields = 5
 	}
-	data := make([]interface{}, 2+nrClients*4)
+	data := make([]interface{}, 2+nrClients*nFields)
 
 	data[0] = "CLIENTS"
 	data[1] = nrClients
@@ -865,7 +867,10 @@ func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdErro
 			data[n+2] = ""
 		}
 		data[n+3] = otherClient.permissions.String()
-		n += 4
+		if client.protocolVersion < 4 {
+			data[n+4] = ""
+		}
+		n += nFields
 	})
 	client.SendPacket(data...)
 	return nil
