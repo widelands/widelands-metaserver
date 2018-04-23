@@ -44,8 +44,7 @@ const (
 // The protocol versions supported by the metaserver
 const (
 	BUILD19 int = 0
-	BUILD20     = 5
-	// TRUNK = 5
+	BUILD20 int = 5
 )
 
 type Client struct {
