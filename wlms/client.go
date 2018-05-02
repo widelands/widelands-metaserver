@@ -84,6 +84,9 @@ type Client struct {
 	// for the challenge-response processes.
 	nonce string
 
+	// The expected response to the challenge sent to a registered client.
+	expectedResponse string
+
 	// The game we are currently in. nil if not in game.
 	game *Game
 
@@ -446,7 +449,7 @@ func (c *Client) sendChallenge(server *Server) {
 	// The nonce is empty when using challenge-response. Use it to store the response
 	var challenge string
 	var success bool
-	challenge, c.nonce, success = server.UserDb().GenerateChallengeResponsePairFromUsername(c.userName)
+	challenge, c.expectedResponse, success = server.UserDb().GenerateChallengeResponsePairFromUsername(c.userName)
 	if !success {
 		// Should not happen, but who knows
 		c.Disconnect(*server)
@@ -460,7 +463,7 @@ func (c *Client) Handle_PWD_CHALLENGE(server *Server, pkg *packet.Packet) CmdErr
 	if err := pkg.Unpack(&response); err != nil {
 		return CriticalCmdPacketError{err.Error()}
 	}
-	if c.nonce != response {
+	if c.expectedResponse != response {
 		return CriticalCmdPacketError{"WRONG_PASSWORD"}
 	}
 	// Password is fine
@@ -497,7 +500,6 @@ func (c *Client) findReplaceCandidates(server *Server, isRegisteredOnServer bool
 			return c.loginDone(server)
 		}
 		// Name is in use or registered for someone else: Search for a free one
-		c.permissions = UNREGISTERED
 		c.findUnconnectedName(server)
 		return nil
 	}
@@ -553,7 +555,6 @@ func (c *Client) checkCandidates(server *Server) {
 }
 
 func (c *Client) findUnconnectedName(server *Server) {
-	c.permissions = UNREGISTERED
 	nameIndex := 0
 	baseName := c.userName
 	for {
@@ -568,9 +569,10 @@ func (c *Client) findUnconnectedName(server *Server) {
 		oldClient := server.HasClient(c.userName)
 		if oldClient == nil {
 			// Found a free name
-			if c.protocolVersion >= BUILD20 {
+			if c.protocolVersion >= BUILD20 && c.permissions == REGISTERED {
 				c.nonce = server.UserDb().GenerateDowngradedUserNonce(baseName, c.userName)
 			}
+			c.permissions = UNREGISTERED
 			c.loginDone(server)
 			return
 		}
