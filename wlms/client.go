@@ -16,6 +16,7 @@ const (
 	UNREGISTERED Permissions = iota
 	REGISTERED
 	SUPERUSER
+	IRC
 )
 
 func (p Permissions) String() string {
@@ -26,6 +27,9 @@ func (p Permissions) String() string {
 		return "REGISTERED"
 	case SUPERUSER:
 		return "SUPERUSER"
+	case IRC:
+		return "IRC"
+
 	default:
 		log.Fatalf("Unknown Permissions: %d", p)
 	}
@@ -280,7 +284,7 @@ func newClient(r ReadWriteCloserWithIp) *Client {
 func NewIRCClient(nick string) *Client {
 	client := &Client{
 		state:       CONNECTED,
-		permissions: UNREGISTERED,
+		permissions: IRC,
 		userName:    nick,
 		buildId:     "IRC",
 		nonce:       "irc",
@@ -337,9 +341,14 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 		server.BroadcastToIrc(client.Name() + ": " + message)
 	} else {
 		recv_client := server.HasClient(receiver)
-		if recv_client != nil {
-			recv_client.SendPacket("CHAT", client.Name(), message, "private")
+		if recv_client == nil {
+			return nil
 		}
+		if recv_client.permissions == IRC {
+			// Bad luck, whispering to IRC is not supported yet
+			client.SendPacket("CHAT", "", "Private messages to IRC users are not supported.", "system")
+		}
+		recv_client.SendPacket("CHAT", client.Name(), message, "private")
 	}
 	return nil
 }
@@ -720,24 +729,26 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 
 func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdError {
 	var nrClients int = 0
+	nFields := 4
 	if client.protocolVersion >= 3 {
 		nrClients = server.NrActiveClients()
 	} else {
 		// Hide IRC users in the lobby of build19 clients. They would appear
 		// at the top of the player list, confusing the user
 		server.ForeachActiveClient(func(otherClient *Client) {
-			if otherClient.buildId != "IRC" {
+			if otherClient.permissions != IRC {
 				nrClients++
 			}
 		})
+		nFields = 5
 	}
-	data := make([]interface{}, 2+nrClients*5)
+	data := make([]interface{}, 2+nrClients*nFields)
 
 	data[0] = "CLIENTS"
 	data[1] = nrClients
 	n := 2
 	server.ForeachActiveClient(func(otherClient *Client) {
-		if client.protocolVersion < 3 && otherClient.buildId == "IRC" {
+		if client.protocolVersion < 3 && otherClient.permissions == IRC {
 			return
 		}
 		data[n+0] = otherClient.userName
@@ -748,8 +759,10 @@ func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdErro
 			data[n+2] = ""
 		}
 		data[n+3] = otherClient.permissions.String()
-		data[n+4] = ""
-		n += 5
+		if client.protocolVersion < 4 {
+			data[n+4] = ""
+		}
+		n += nFields
 	})
 	client.SendPacket(data...)
 	return nil
