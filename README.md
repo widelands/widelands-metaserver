@@ -25,9 +25,10 @@ in the Widelands sources at <https://launchpad.net/widelands>.
 
 # Testing locally
 
-1. `$GOPATH/bin/wlms`. This starts the server with an empty in memory user database.
-2. Edit `~/.widelands/config` and add the line `metaserver="127.0.0.1"` before
+1. `$GOPATH/bin/wlnr`. This starts the relay server for hosting games.
+2. `$GOPATH/bin/wlms`. This starts the server with an empty in memory user database.
+3. Edit `~/.widelands/config` and add the line `metaserver="localhost"` before
    launching widelands.
-3. Launch Widelands and click on internet game.
-4. Do not forget to remove the metaserver line once you want to play on the real
+4. Launch Widelands and click on internet game.
+5. Do not forget to remove the metaserver line once you want to play on the real
    metaserver again.
