@@ -532,7 +532,8 @@ func (c *Client) checkCandidates(server *Server) {
 	}
 	var oldClient *Client
 	oldClient, c.replaceCandidates = c.replaceCandidates[0], c.replaceCandidates[1:]
-	if oldClient.userName != c.userName {
+	if oldClient.userName != c.userName && c.permissions != UNREGISTERED {
+		// TODO(Notabilis): This can probably done later when the oldClient really is replaced
 		// Other username: Drop permissions
 		c.nonce = server.UserDb().GenerateDowngradedUserNonce(c.userName, oldClient.userName)
 		c.permissions = UNREGISTERED
