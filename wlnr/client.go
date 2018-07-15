@@ -124,8 +124,11 @@ func (c *Client) Disconnect(reason string) {
 	cmd := NewCommand(kDisconnect)
 	cmd.AppendString(reason)
 	c.SendCommand(cmd)
-	c.conn.Close()
+	// Since conn.Close() indirectly calls this method again,
+	// mark the connection as closed before calling it
+	conn := c.conn
 	c.conn = nil
+	conn.Close()
 }
 
 func (c *Client) pingLoop() {

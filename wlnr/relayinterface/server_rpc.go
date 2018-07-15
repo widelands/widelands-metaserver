@@ -72,7 +72,9 @@ func (server *ServerRPC) callClientMethod(action, gameName string) {
 		// Probably there never was a connection, try to create one now
 		// Isn't done in the constructor since we have a circular dependency between
 		// relay and metaserver
-		server.connect()
+		if (!server.connect()) {
+			return
+		}
 	}
 	var ignored bool
 	data := GameData{
