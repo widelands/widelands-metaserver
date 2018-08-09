@@ -1,15 +1,15 @@
 package main
 
 import (
-	"log"
 	"github.com/thoj/go-ircevent"
+	"log"
 	"strings"
 )
 
 // Structure with channels for communication between IRCBridger and the metaserver
 type IRCBridgerChannels struct {
 	// Messages sent by IRC users that should be displayed in the lobby
-	messagesFromIRC  chan Message
+	messagesFromIRC chan Message
 	// Messages from players in the lobby that should be relayed to IRC
 	messagesToIRC chan Message
 	// Clients joining the IRC channel that should be added to the client list in the lobby
@@ -53,8 +53,16 @@ func NewIRCBridge(server, realname, nickname, channel string, tls bool) *IRCBrid
 }
 
 func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
+	if bridge.nick == "" || bridge.user == "" {
+		log.Fatalf("Can't start IRC: nick (%s) or user (%s) invalid", bridge.nick, bridge.user)
+		return false
+	}
 	//Create new connection
 	bridge.connection = irc.IRC(bridge.nick, bridge.user)
+	if bridge.connection == nil {
+		log.Fatalf("Can't create IRC connection")
+		return false
+	}
 	//Set options
 	bridge.connection.UseTLS = bridge.useTLS
 	//connection.TLSOptions //set ssl options
@@ -62,7 +70,7 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 	//Commands
 	err := bridge.connection.Connect(bridge.server) //Connect to server
 	if err != nil {
-		log.Fatalf("Can't connect %s", bridge.server)
+		log.Fatalf("Can't connect to IRC server at %s", bridge.server)
 		return false
 	}
 	bridge.connection.AddCallback("001", func(e *irc.Event) { bridge.connection.Join(bridge.channel) })
