@@ -139,6 +139,9 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 			bridge.connection.Privmsg(bridge.channel, m.message)
 		}
 	}()
+	// Main loop to react to disconnects and automatically reconnect
+	go bridge.connection.Loop()
+	log.Printf("IRC bridge started")
 	return true
 }
 
