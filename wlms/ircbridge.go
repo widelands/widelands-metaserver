@@ -83,7 +83,7 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 			message: event.Message(),
 		}:
 		default:
-			log.Println("IRC Message Queue full.")
+			log.Println("Message queue from IRC full.")
 		}
 	})
 	bridge.connection.AddCallback("JOIN", func(e *irc.Event) {
