@@ -21,7 +21,7 @@ type IRCBridgerChannels struct {
 func NewIRCBridgerChannels() *IRCBridgerChannels {
 	return &IRCBridgerChannels{
 		messagesFromIRC:   make(chan Message, 50),
-		messagesToIRC:     make(chan Message, 50),
+		messagesToIRC:     make(chan Message, 5),
 		clientsJoiningIRC: make(chan string, 50),
 		clientsLeavingIRC: make(chan string, 50),
 	}
