@@ -73,7 +73,23 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 		log.Fatalf("Can't connect to IRC server at %s", bridge.server)
 		return false
 	}
-	bridge.connection.AddCallback("001", func(e *irc.Event) { bridge.connection.Join(bridge.channel) })
+	bridge.connection.AddCallback("001", func(e *irc.Event) {
+		bridge.connection.Join(bridge.channel)
+		// HACK: This will start a new goroutine each time we connect to the IRC server.
+		// Unfortunately, on connection loss Privmsg() will store a few messages inside a
+		// buffer of the IRC library and then block when the buffer runs full.
+		// Since the buffer is never emptied by the library but a new one is created,
+		// our goroutine is stuck forever. Since we can't un-stuck it, create a new one
+		// for the next connection to IRC.
+		// The problem is that we end up with a few blocked goroutines over the runtime
+		// of the metaserver. But luckily restarts of the IRC server seem to be very rare
+		go func() {
+			for m := range channels.messagesToIRC {
+				bridge.connection.Privmsg(bridge.channel, m.message)
+			}
+		}()
+
+	})
 	bridge.connection.AddCallback("PRIVMSG", func(event *irc.Event) {
 		//e.Message contains the message
 		//e.Nick Contains the sender
@@ -134,11 +150,6 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 			}
 		}
 	})
-	go func() {
-		for m := range channels.messagesToIRC {
-			bridge.connection.Privmsg(bridge.channel, m.message)
-		}
-	}()
 	// Main loop to react to disconnects and automatically reconnect
 	go bridge.connection.Loop()
 	log.Printf("IRC bridge started")
