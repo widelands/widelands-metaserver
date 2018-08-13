@@ -138,10 +138,7 @@ func (s *Server) RemoveClient(client *Client) {
 		if e.Value.(*Client) == client {
 			if client.buildId != "IRC" {
 				log.Printf("Removing client %s", client.Name())
-				s.irc.messagesToIRC <- Message{
-					message: client.Name() + " has left the lobby",
-					nick:    client.Name(),
-				}
+				s.BroadcastToIrcFromUser(client.Name()+" has left the lobby", client.Name())
 			}
 			s.clients.Remove(e)
 			break
@@ -272,15 +269,20 @@ func (s *Server) BroadcastToConnectedClients(data ...interface{}) {
 }
 
 func (s Server) BroadcastToIrc(message string) {
+	s.BroadcastToIrcFromUser(message, "")
+}
+
+func (s Server) BroadcastToIrcFromUser(message, nick string) {
 	select {
 	case s.irc.messagesToIRC <- Message{
 		message: message,
+		nick:    nick,
 	}:
 	default:
-		log.Println("Message Queue full")
+		log.Println("Message queue to IRC full")
 	}
-
 }
+
 func RunServer(db UserDb, irc *IRCBridgerChannels, hostname string) {
 	ln, err := net.Listen("tcp", ":7395")
 	if err != nil {

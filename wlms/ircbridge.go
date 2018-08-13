@@ -1,15 +1,15 @@
 package main
 
 import (
-	"log"
 	"github.com/thoj/go-ircevent"
+	"log"
 	"strings"
 )
 
 // Structure with channels for communication between IRCBridger and the metaserver
 type IRCBridgerChannels struct {
 	// Messages sent by IRC users that should be displayed in the lobby
-	messagesFromIRC  chan Message
+	messagesFromIRC chan Message
 	// Messages from players in the lobby that should be relayed to IRC
 	messagesToIRC chan Message
 	// Clients joining the IRC channel that should be added to the client list in the lobby
@@ -21,7 +21,7 @@ type IRCBridgerChannels struct {
 func NewIRCBridgerChannels() *IRCBridgerChannels {
 	return &IRCBridgerChannels{
 		messagesFromIRC:   make(chan Message, 50),
-		messagesToIRC:     make(chan Message, 50),
+		messagesToIRC:     make(chan Message, 5),
 		clientsJoiningIRC: make(chan string, 50),
 		clientsLeavingIRC: make(chan string, 50),
 	}
@@ -53,8 +53,16 @@ func NewIRCBridge(server, realname, nickname, channel string, tls bool) *IRCBrid
 }
 
 func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
+	if bridge.nick == "" || bridge.user == "" {
+		log.Fatalf("Can't start IRC: nick (%s) or user (%s) invalid", bridge.nick, bridge.user)
+		return false
+	}
 	//Create new connection
 	bridge.connection = irc.IRC(bridge.nick, bridge.user)
+	if bridge.connection == nil {
+		log.Fatalf("Can't create IRC connection")
+		return false
+	}
 	//Set options
 	bridge.connection.UseTLS = bridge.useTLS
 	//connection.TLSOptions //set ssl options
@@ -62,10 +70,26 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 	//Commands
 	err := bridge.connection.Connect(bridge.server) //Connect to server
 	if err != nil {
-		log.Fatalf("Can't connect %s", bridge.server)
+		log.Fatalf("Can't connect to IRC server at %s", bridge.server)
 		return false
 	}
-	bridge.connection.AddCallback("001", func(e *irc.Event) { bridge.connection.Join(bridge.channel) })
+	bridge.connection.AddCallback("001", func(e *irc.Event) {
+		bridge.connection.Join(bridge.channel)
+		// HACK: This will start a new goroutine each time we connect to the IRC server.
+		// Unfortunately, on connection loss Privmsg() will store a few messages inside a
+		// buffer of the IRC library and then block when the buffer runs full.
+		// Since the buffer is never emptied by the library but a new one is created,
+		// our goroutine is stuck forever. Since we can't un-stuck it, create a new one
+		// for the next connection to IRC.
+		// The problem is that we end up with a few blocked goroutines over the runtime
+		// of the metaserver. But luckily restarts of the IRC server seem to be very rare
+		go func() {
+			for m := range channels.messagesToIRC {
+				bridge.connection.Privmsg(bridge.channel, m.message)
+			}
+		}()
+
+	})
 	bridge.connection.AddCallback("PRIVMSG", func(event *irc.Event) {
 		//e.Message contains the message
 		//e.Nick Contains the sender
@@ -75,7 +99,7 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 			message: event.Message(),
 		}:
 		default:
-			log.Println("IRC Message Queue full.")
+			log.Println("Message queue from IRC full.")
 		}
 	})
 	bridge.connection.AddCallback("JOIN", func(e *irc.Event) {
@@ -126,11 +150,9 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 			}
 		}
 	})
-	go func() {
-		for m := range channels.messagesToIRC {
-			bridge.connection.Privmsg(bridge.channel, m.message)
-		}
-	}()
+	// Main loop to react to disconnects and automatically reconnect
+	go bridge.connection.Loop()
+	log.Printf("IRC bridge started")
 	return true
 }
 
