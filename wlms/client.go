@@ -345,9 +345,6 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 		return CmdPacketError{err.Error()}
 	}
 
-	// Sanitize message.
-	message = strings.Replace(message, "<", "&lt;", -1)
-
 	if len(receiver) == 0 {
 		server.BroadcastToConnectedClients("CHAT", client.Name(), message, "public")
 		server.BroadcastToIrc(client.Name() + ": " + message)
