@@ -513,7 +513,18 @@ func (c *Client) loginDone(server *Server) CmdError {
 	log.Printf("Client %v logged in (game version %v, protocol version %v)", c.userName, c.buildId, c.protocolVersion)
 
 	c.SendPacket("LOGIN", c.userName, c.permissions.String())
+	if c.protocolVersion <= BUILD19 {
+		// Old MotD, now only used in build 19 and older. Newer client display this text locally
+		c.SendPacket("CHAT", "", "Welcome on the Widelands Metaserver!", "system")
+
+	}
 	c.SendPacket("TIME", int(time.Now().Unix()))
+	if c.protocolVersion <= BUILD19 {
+		c.SendPacket("CHAT", "", "Our forums can be found at:", "system")
+		c.SendPacket("CHAT", "", "https://wl.widelands.org/forum/", "system")
+		c.SendPacket("CHAT", "", "Please report bugs at:", "system")
+		c.SendPacket("CHAT", "", "https://launchpad.net/widelands", "system")
+	}
 	server.AddClient(c)
 	c.setState(CONNECTED, *server)
 
