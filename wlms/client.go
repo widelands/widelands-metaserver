@@ -522,8 +522,8 @@ func (c *Client) loginDone(server *Server) CmdError {
 	if c.protocolVersion <= BUILD19 {
 		c.SendPacket("CHAT", "", "Our forums can be found at:", "system")
 		c.SendPacket("CHAT", "", "https://wl.widelands.org/forum/", "system")
-		c.SendPacket("CHAT", "", "Please report bugs at:", "system")
-		c.SendPacket("CHAT", "", "https://launchpad.net/widelands", "system")
+		c.SendPacket("CHAT", "", "For reporting bugs, visit:", "system")
+		c.SendPacket("CHAT", "", "https://wl.widelands.org/wiki/ReportingBugs/", "system")
 	}
 	server.AddClient(c)
 	c.setState(CONNECTED, *server)
