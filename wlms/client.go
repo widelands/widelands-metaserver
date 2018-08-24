@@ -345,9 +345,6 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 		return CmdPacketError{err.Error()}
 	}
 
-	// Sanitize message.
-	message = strings.Replace(message, "<", "&lt;", -1)
-
 	if len(receiver) == 0 {
 		server.BroadcastToConnectedClients("CHAT", client.Name(), message, "public")
 		server.BroadcastToIrc(client.Name() + ": " + message)
@@ -516,7 +513,18 @@ func (c *Client) loginDone(server *Server) CmdError {
 	log.Printf("Client %v logged in (game version %v, protocol version %v)", c.userName, c.buildId, c.protocolVersion)
 
 	c.SendPacket("LOGIN", c.userName, c.permissions.String())
+	if c.protocolVersion <= BUILD19 {
+		// Old MotD, now only used in build 19 and older. Newer client display this text locally
+		c.SendPacket("CHAT", "", "Welcome on the Widelands Metaserver!", "system")
+
+	}
 	c.SendPacket("TIME", int(time.Now().Unix()))
+	if c.protocolVersion <= BUILD19 {
+		c.SendPacket("CHAT", "", "Our forums can be found at:", "system")
+		c.SendPacket("CHAT", "", "https://wl.widelands.org/forum/", "system")
+		c.SendPacket("CHAT", "", "For reporting bugs, visit:", "system")
+		c.SendPacket("CHAT", "", "https://wl.widelands.org/wiki/ReportingBugs/", "system")
+	}
 	server.AddClient(c)
 	c.setState(CONNECTED, *server)
 
