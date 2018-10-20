@@ -413,6 +413,10 @@ func (client *Client) Handle_PONG(server *Server, pkg *packet.Packet) CmdError {
 }
 
 func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
+	if c.state == CONNECTED {
+		// Client is already connected? Then LOGIN isn't permitted
+		return CriticalCmdPacketError{"ALREADY_LOGGED_IN"}
+	}
 	var isRegisteredOnServer bool
 	if err := pkg.Unpack(&c.protocolVersion, &c.userName, &c.buildId, &isRegisteredOnServer); err != nil {
 		return CriticalCmdPacketError{err.Error()}
