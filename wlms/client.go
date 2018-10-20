@@ -577,7 +577,16 @@ func (c *Client) checkCandidates(server *Server) {
 func (c *Client) findUnconnectedName(server *Server) {
 	nameIndex := 0
 	baseName := c.userName
+	loops := 0
 	for {
+		loops++
+		if loops > 1000 {
+			// This code should never be reached but there is an unreproduced bug where this loop
+			// looped forever. See https://github.com/widelands/widelands_metaserver/issues/38
+			log.Printf("ERROR: Tried to find an unused name for client %v but failed 1000 times. This should not happen", baseName)
+			c.Disconnect(*server)
+			return
+		}
 		// Generate new name
 		nameIndex++
 		c.userName = fmt.Sprintf("%s%d", baseName, nameIndex)
