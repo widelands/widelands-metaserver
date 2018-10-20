@@ -168,7 +168,7 @@ func (client *Client) SendPacket(data ...interface{}) {
 	if client.conn != nil {
 		_, err := client.conn.Write(packet.New(data...))
 		if err != nil {
-			log.Printf("Warning: Error while sending data to client %v", client.Name())
+			log.Printf("Warning: Error while sending data to client %v: %v", client.Name(), err)
 		}
 	}
 }
