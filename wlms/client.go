@@ -352,6 +352,9 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 	} else {
 		recv_client := server.HasClient(receiver)
 		if recv_client == nil {
+			if client.protocolVersion >= BUILD20 {
+				client.SendPacket("ERROR", "CHAT", "NO_SUCH_USER")
+			}
 			return nil
 		}
 		if recv_client.permissions == IRC {
