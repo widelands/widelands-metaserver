@@ -518,7 +518,7 @@ func (c *Client) findReplaceCandidates(server *Server, isRegisteredOnServer bool
 func (c *Client) loginDone(server *Server) CmdError {
 
 	c.loginTime = time.Now()
-	log.Printf("Client %v logged in (game version %v, protocol version %v)", c.userName, c.buildId, c.protocolVersion)
+	log.Printf("Client %v logged in (%v, version %v, %v)", c.userName, c.buildId, c.protocolVersion, c.permissions)
 
 	c.SendPacket("LOGIN", c.userName, c.permissions.String())
 	if c.protocolVersion <= BUILD19 {
