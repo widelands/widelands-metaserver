@@ -210,6 +210,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 					client.pendingLogin.SendPacket("ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
 					client.pendingLogin.Disconnect(*server)
 				} else {
+					// replaceCandidates might be an empty list but won't be nil
 					client.pendingLogin.checkCandidates(server)
 				}
 				client.pendingLogin = nil
@@ -233,11 +234,11 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 					log.Printf("Error while handling command %v for client %v: %v", cmdName, client.Name(), pkgErr.What)
 					client.SendPacket("ERROR", cmdName, pkgErr.What)
 				case CriticalCmdPacketError:
-					log.Printf("Error while handling command %v for client %v: %v", cmdName, client.Name(), pkgErr.What)
+					log.Printf("Critical error while handling command %v for client %v: %v", cmdName, client.Name(), pkgErr.What)
 					client.SendPacket("ERROR", cmdName, pkgErr.What)
 					client.Disconnect(*server)
 				case InvalidPacketError:
-					log.Printf("Error while handling command %v from client %v", cmdName, client.Name())
+					log.Printf("Error while handling invalid command %v from client %v", cmdName, client.Name())
 					client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 					client.Disconnect(*server)
 				default:
