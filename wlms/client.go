@@ -195,6 +195,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 		case pkg, ok := <-client.dataStream:
 			if !ok {
 				if client.state != RECENTLY_DISCONNECTED {
+					log.Printf("Empty data stream for client %v. Will disconnect", client.Name())
 					client.failedPong(server)
 				}
 				// Else the receive failed due to a Disconnect() which is fine
@@ -205,6 +206,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			client.timeoutTimer.Reset(server.ClientSendingTimeout())
 
 			if client.pendingLogin != nil {
+				log.Printf("Dealing with pending login for client %v, new client is %v", client.Name(), client.pendingLogin.Name())
 				if client.pendingLogin.replaceCandidates == nil {
 					// legacy path
 					client.pendingLogin.SendPacket("ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
@@ -255,6 +257,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			if !client.waitingForPong {
 				client.restartPingLoop(server.PingCycleTime())
 			} else {
+				log.Printf("Client %v failed to PONG. Will disconnect", client.Name())
 				client.failedPong(server)
 			}
 		}
@@ -262,7 +265,6 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 }
 
 func (client *Client) failedPong(server *Server) {
-	log.Printf("Client %v failed to PONG. Will disconnect", client.Name())
 	client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 	client.Disconnect(*server)
 	if client.pendingLogin != nil {
@@ -278,7 +280,6 @@ func (client *Client) failedPong(server *Server) {
 			pending.loginDone(server)
 		}
 	}
-
 }
 
 func newClient(r ReadWriteCloserWithIp) *Client {
@@ -396,6 +397,7 @@ func (client *Client) Handle_ANNOUNCEMENT(server *Server, pkg *packet.Packet) Cm
 func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) CmdError {
 	var reason string
 	if err := pkg.Unpack(&reason); err != nil {
+		log.Printf("Client %v left for unknown reason", client.Name())
 		return CmdPacketError{err.Error()}
 	}
 	log.Printf("Client %v left. Reason: '%v'", client.Name(), reason)
@@ -421,6 +423,7 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 	if err := pkg.Unpack(&c.protocolVersion, &c.userName, &c.buildId, &isRegisteredOnServer); err != nil {
 		return CriticalCmdPacketError{err.Error()}
 	}
+	log.Printf("Client %v wants to log in (%v, version %v, registered=%v)", c.userName, c.buildId, c.protocolVersion, isRegisteredOnServer)
 
 	// Check protocol version
 	if c.protocolVersion != BUILD19 && c.protocolVersion != BUILD20 {
@@ -545,6 +548,7 @@ func (c *Client) loginDone(server *Server) CmdError {
 }
 
 func (c *Client) checkCandidates(server *Server) {
+	log.Printf("Client %v checks for client to replace, %v found", c.userName, len(c.replaceCandidates))
 	if len(c.replaceCandidates) == 0 {
 		c.findUnconnectedName(server)
 		return
@@ -575,6 +579,7 @@ func (c *Client) checkCandidates(server *Server) {
 }
 
 func (c *Client) findUnconnectedName(server *Server) {
+	log.Printf("Client %v generates new name", c.userName)
 	nameIndex := 0
 	baseName := c.userName
 	loops := 0
