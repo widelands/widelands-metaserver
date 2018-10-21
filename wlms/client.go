@@ -519,6 +519,12 @@ func (c *Client) findReplaceCandidates(server *Server, isRegisteredOnServer bool
 }
 
 func (c *Client) loginDone(server *Server) CmdError {
+	if c.state != HANDSHAKE {
+		log.Printf("Told to finish login of client %v but client already is logged in. Disconnecting.", c.Name())
+		c.SendPacket("ERROR", "LOGIN", "ALREADY_LOGGED_IN")
+		c.Disconnect(*server)
+		return nil
+	}
 
 	c.loginTime = time.Now()
 	log.Printf("Client %v logged in (%v, version %v, %v)", c.userName, c.buildId, c.protocolVersion, c.permissions)
@@ -548,6 +554,12 @@ func (c *Client) loginDone(server *Server) CmdError {
 }
 
 func (c *Client) checkCandidates(server *Server) {
+	if c.state != HANDSHAKE {
+		log.Printf("Told to check candidates for client %v but client already is logged in. Disconnecting.", c.Name())
+		c.SendPacket("ERROR", "LOGIN", "ALREADY_LOGGED_IN")
+		c.Disconnect(*server)
+		return
+	}
 	log.Printf("Client %v checks for client to replace, %v found", c.userName, len(c.replaceCandidates))
 	if len(c.replaceCandidates) == 0 {
 		c.findUnconnectedName(server)
@@ -615,6 +627,9 @@ func (c *Client) findUnconnectedName(server *Server) {
 
 // Only for legacy clients
 func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdError {
+	if client.state != HANDSHAKE {
+		return CriticalCmdPacketError{"ALREADY_LOGGED_IN"}
+	}
 	var isRegisteredOnServer bool
 	var protocolVersion int
 	var userName, buildId, nonce string
