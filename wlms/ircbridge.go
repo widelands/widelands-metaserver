@@ -151,7 +151,7 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 		}
 	})
 	bridge.connection.AddCallback("*", func(e *irc.Event) {
-		// Wildcard event: Is triggered for every even
+		// Wildcard event: Is triggered for every event
 		// Log the event and its data. Will probably create a lot of
 		// noise in the logfile but will hopefully tell me which
 		// command creates the IRC "ghosts" (no longer online IRC users,
