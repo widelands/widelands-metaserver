@@ -168,7 +168,7 @@ func (client *Client) SendPacket(data ...interface{}) {
 	if client.conn != nil {
 		_, err := client.conn.Write(packet.New(data...))
 		if err != nil {
-			log.Printf("Warning: Error while sending data to client %v", client.Name())
+			log.Printf("Warning: Error while sending data to client %v: %v", client.Name(), err)
 		}
 	}
 }
@@ -195,6 +195,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 		case pkg, ok := <-client.dataStream:
 			if !ok {
 				if client.state != RECENTLY_DISCONNECTED {
+					log.Printf("Empty data stream for client %v. Will disconnect", client.Name())
 					client.failedPong(server)
 				}
 				// Else the receive failed due to a Disconnect() which is fine
@@ -205,11 +206,13 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			client.timeoutTimer.Reset(server.ClientSendingTimeout())
 
 			if client.pendingLogin != nil {
+				log.Printf("Dealing with pending login for client %v, new client is %v", client.Name(), client.pendingLogin.Name())
 				if client.pendingLogin.replaceCandidates == nil {
 					// legacy path
 					client.pendingLogin.SendPacket("ERROR", "RELOGIN", "CONNECTION_STILL_ALIVE")
 					client.pendingLogin.Disconnect(*server)
 				} else {
+					// replaceCandidates might be an empty list but won't be nil
 					client.pendingLogin.checkCandidates(server)
 				}
 				client.pendingLogin = nil
@@ -233,11 +236,11 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 					log.Printf("Error while handling command %v for client %v: %v", cmdName, client.Name(), pkgErr.What)
 					client.SendPacket("ERROR", cmdName, pkgErr.What)
 				case CriticalCmdPacketError:
-					log.Printf("Error while handling command %v for client %v: %v", cmdName, client.Name(), pkgErr.What)
+					log.Printf("Critical error while handling command %v for client %v: %v", cmdName, client.Name(), pkgErr.What)
 					client.SendPacket("ERROR", cmdName, pkgErr.What)
 					client.Disconnect(*server)
 				case InvalidPacketError:
-					log.Printf("Error while handling command %v from client %v", cmdName, client.Name())
+					log.Printf("Error while handling invalid command %v from client %v", cmdName, client.Name())
 					client.SendPacket("ERROR", "GARBAGE_RECEIVED", "INVALID_CMD")
 					client.Disconnect(*server)
 				default:
@@ -254,6 +257,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 			if !client.waitingForPong {
 				client.restartPingLoop(server.PingCycleTime())
 			} else {
+				log.Printf("Client %v failed to PONG. Will disconnect", client.Name())
 				client.failedPong(server)
 			}
 		}
@@ -261,7 +265,6 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 }
 
 func (client *Client) failedPong(server *Server) {
-	log.Printf("Client %v failed to PONG. Will disconnect", client.Name())
 	client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 	client.Disconnect(*server)
 	if client.pendingLogin != nil {
@@ -277,7 +280,6 @@ func (client *Client) failedPong(server *Server) {
 			pending.loginDone(server)
 		}
 	}
-
 }
 
 func newClient(r ReadWriteCloserWithIp) *Client {
@@ -351,6 +353,9 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 	} else {
 		recv_client := server.HasClient(receiver)
 		if recv_client == nil {
+			if client.protocolVersion >= BUILD20 {
+				client.SendPacket("ERROR", "CHAT", "NO_SUCH_USER")
+			}
 			return nil
 		}
 		if recv_client.permissions == IRC {
@@ -392,6 +397,7 @@ func (client *Client) Handle_ANNOUNCEMENT(server *Server, pkg *packet.Packet) Cm
 func (client *Client) Handle_DISCONNECT(server *Server, pkg *packet.Packet) CmdError {
 	var reason string
 	if err := pkg.Unpack(&reason); err != nil {
+		log.Printf("Client %v left for unknown reason", client.Name())
 		return CmdPacketError{err.Error()}
 	}
 	log.Printf("Client %v left. Reason: '%v'", client.Name(), reason)
@@ -409,10 +415,15 @@ func (client *Client) Handle_PONG(server *Server, pkg *packet.Packet) CmdError {
 }
 
 func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
+	if c.state == CONNECTED {
+		// Client is already connected? Then LOGIN isn't permitted
+		return CriticalCmdPacketError{"ALREADY_LOGGED_IN"}
+	}
 	var isRegisteredOnServer bool
 	if err := pkg.Unpack(&c.protocolVersion, &c.userName, &c.buildId, &isRegisteredOnServer); err != nil {
 		return CriticalCmdPacketError{err.Error()}
 	}
+	log.Printf("Client %v wants to log in (%v, version %v, registered=%v)", c.userName, c.buildId, c.protocolVersion, isRegisteredOnServer)
 
 	// Check protocol version
 	if c.protocolVersion != BUILD19 && c.protocolVersion != BUILD20 {
@@ -508,9 +519,15 @@ func (c *Client) findReplaceCandidates(server *Server, isRegisteredOnServer bool
 }
 
 func (c *Client) loginDone(server *Server) CmdError {
+	if c.state != HANDSHAKE {
+		log.Printf("Told to finish login of client %v but client already is logged in. Disconnecting.", c.Name())
+		c.SendPacket("ERROR", "LOGIN", "ALREADY_LOGGED_IN")
+		c.Disconnect(*server)
+		return nil
+	}
 
 	c.loginTime = time.Now()
-	log.Printf("Client %v logged in (game version %v, protocol version %v)", c.userName, c.buildId, c.protocolVersion)
+	log.Printf("Client %v logged in (%v, version %v, %v)", c.userName, c.buildId, c.protocolVersion, c.permissions)
 
 	c.SendPacket("LOGIN", c.userName, c.permissions.String())
 	if c.protocolVersion <= BUILD19 {
@@ -537,6 +554,13 @@ func (c *Client) loginDone(server *Server) CmdError {
 }
 
 func (c *Client) checkCandidates(server *Server) {
+	if c.state != HANDSHAKE {
+		log.Printf("Told to check candidates for client %v but client already is logged in. Disconnecting.", c.Name())
+		c.SendPacket("ERROR", "LOGIN", "ALREADY_LOGGED_IN")
+		c.Disconnect(*server)
+		return
+	}
+	log.Printf("Client %v checks for client to replace, %v found", c.userName, len(c.replaceCandidates))
 	if len(c.replaceCandidates) == 0 {
 		c.findUnconnectedName(server)
 		return
@@ -567,9 +591,19 @@ func (c *Client) checkCandidates(server *Server) {
 }
 
 func (c *Client) findUnconnectedName(server *Server) {
+	log.Printf("Client %v generates new name", c.userName)
 	nameIndex := 0
 	baseName := c.userName
+	loops := 0
 	for {
+		loops++
+		if loops > 1000 {
+			// This code should never be reached but there is an unreproduced bug where this loop
+			// looped forever. See https://github.com/widelands/widelands_metaserver/issues/38
+			log.Printf("ERROR: Tried to find an unused name for client %v but failed 1000 times. This should not happen", baseName)
+			c.Disconnect(*server)
+			return
+		}
 		// Generate new name
 		nameIndex++
 		c.userName = fmt.Sprintf("%s%d", baseName, nameIndex)
@@ -593,6 +627,9 @@ func (c *Client) findUnconnectedName(server *Server) {
 
 // Only for legacy clients
 func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdError {
+	if client.state != HANDSHAKE {
+		return CriticalCmdPacketError{"ALREADY_LOGGED_IN"}
+	}
 	var isRegisteredOnServer bool
 	var protocolVersion int
 	var userName, buildId, nonce string

@@ -76,9 +76,8 @@ func (game *Game) doPing(server *Server, host string, pingTimeout time.Duration)
 }
 
 func (game *Game) pingCycle(server *Server) {
-	// Remember to remove the game when we no longer receive pings.
-	if !game.usesRelay {
-		defer server.RemoveGame(game)
+	if game.usesRelay {
+		log.Fatalf("Error: Started pingCycle for game %v on relay", game.Name())
 	}
 
 	pingTimeout := server.GameInitialPingTimeout()
