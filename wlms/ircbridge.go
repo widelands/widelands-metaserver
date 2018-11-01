@@ -165,25 +165,6 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 			log.Println("IRC Joining Queue full.")
 		}
 	})
-	bridge.connection.AddCallback("*", func(e *irc.Event) {
-		// Wildcard event: Is triggered for every event
-		// Log the event and its data. Will probably create a lot of
-		// noise in the logfile but will hopefully tell me which
-		// command creates the IRC "ghosts" (no longer online IRC users,
-		// that are still listed on the metaserver)
-		switch e.Code {
-			case
-				"001",
-				"PRIVMSG",
-				"JOIN",
-				"PART",
-				"QUIT",
-				"353":
-				// Skip the messages we are already handling
-				return
-		}
-		log.Printf("IRC DEBUG: Received event %v", e)
-	})
 	// Main loop to react to disconnects and automatically reconnect
 	go bridge.connection.Loop()
 	log.Printf("IRC bridge started")
