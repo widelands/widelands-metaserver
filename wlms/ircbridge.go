@@ -136,7 +136,7 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 			log.Println("IRC Quitting Queue full.")
 		}
 	})
-	// NAMREPLY: List of all nicknames in the channel. Send to us when we join
+	// NAMREPLY: List of all nicknames in the channel. Sent to us when we join
 	bridge.connection.AddCallback("353", func(e *irc.Event) {
 		nicks := strings.Fields(e.Message())
 		for _, nick := range nicks {
@@ -151,7 +151,7 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 		}
 	})
 	bridge.connection.AddCallback("NICK", func(e *irc.Event) {
-		// Someone changed its name
+		// Someone changed their name
 		// Remove old name
 		select {
 		case channels.clientsLeavingIRC <- e.Nick:
