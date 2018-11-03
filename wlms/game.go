@@ -71,6 +71,16 @@ func (game *Game) doPing(server *Server, host string, pingTimeout time.Duration)
 		default:
 			log.Fatalf("Unhandled game.state: %v", game.state)
 		}
+		if !game.usesRelay {
+			host := server.HasClient(game.Host())
+			if host == nil || host.Game() != game {
+				// Can happen if a client has lost connection to the metaserver.
+				// In that case, kick all players and remove the game
+				log.Printf("Removing unconnectable game '%v' of disconnected legacy player %v", game.Name(), game.Host())
+				game.RemovePlayer(game.Host(), server)
+				return result
+			}
+		}
 	}
 	return result
 }

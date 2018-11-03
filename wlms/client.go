@@ -159,6 +159,10 @@ func (client *Client) setGame(game *Game, server *Server) {
 	server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 }
 
+func (client Client) Game() *Game {
+	return client.game
+}
+
 func (client *Client) Disconnect(server Server) {
 	client.conn.Close()
 	client.setState(RECENTLY_DISCONNECTED, server)
@@ -334,6 +338,7 @@ func (client Client) remoteIp() string {
 }
 
 func (newClient *Client) successfulRelogin(server *Server, oldClient *Client) {
+	// legacy function
 	server.RemoveClient(oldClient)
 
 	newClient.SendPacket("RELOGIN")
