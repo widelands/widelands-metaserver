@@ -136,7 +136,7 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 			log.Println("IRC Quitting Queue full.")
 		}
 	})
-	// NAMREPLY: List of all nicknames in the channel. Send when we join
+	// NAMREPLY: List of all nicknames in the channel. Sent to us when we join
 	bridge.connection.AddCallback("353", func(e *irc.Event) {
 		nicks := strings.Fields(e.Message())
 		for _, nick := range nicks {
@@ -150,24 +150,20 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 			}
 		}
 	})
-	bridge.connection.AddCallback("*", func(e *irc.Event) {
-		// Wildcard event: Is triggered for every event
-		// Log the event and its data. Will probably create a lot of
-		// noise in the logfile but will hopefully tell me which
-		// command creates the IRC "ghosts" (no longer online IRC users,
-		// that are still listed on the metaserver)
-		switch e.Code {
-			case
-				"001",
-				"PRIVMSG",
-				"JOIN",
-				"PART",
-				"QUIT",
-				"353":
-				// Skip the messages we are already handling
-				return
+	bridge.connection.AddCallback("NICK", func(e *irc.Event) {
+		// Someone changed their name
+		// Remove old name
+		select {
+		case channels.clientsLeavingIRC <- e.Nick:
+		default:
+			log.Println("IRC Quitting Queue full.")
 		}
-		log.Printf("IRC DEBUG: Received event %v", e)
+		// Add new name
+		select {
+		case channels.clientsJoiningIRC <- e.Message():
+		default:
+			log.Println("IRC Joining Queue full.")
+		}
 	})
 	// Main loop to react to disconnects and automatically reconnect
 	go bridge.connection.Loop()
