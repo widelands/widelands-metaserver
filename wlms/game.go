@@ -38,6 +38,7 @@ type Game struct {
 	buildId   string
 	state     GameState
 	usesRelay bool // True if all network traffic passes through our relay server.
+	creationTime time.Time
 }
 
 type GamePinger struct {
@@ -121,12 +122,13 @@ func (game *Game) pingCycle(server *Server) {
 
 func NewGame(host string, buildId string, server *Server, gameName string, shouldUseRelay bool) *Game {
 	game := &Game{
-		players:   make(map[string]bool),
-		host:      host,
-		buildId:   buildId,
-		name:      gameName,
-		state:     INITIAL_SETUP,
-		usesRelay: shouldUseRelay,
+		players:      make(map[string]bool),
+		host:         host,
+		buildId:      buildId,
+		name:         gameName,
+		state:        INITIAL_SETUP,
+		usesRelay:    shouldUseRelay,
+		creationTime: time.Now(),
 	}
 	server.AddGame(game)
 
@@ -186,4 +188,8 @@ func (g Game) NrPlayers() int {
 
 func (g Game) UsesRelay() bool {
 	return g.usesRelay
+}
+
+func (g Game) CreationTime() time.Time {
+	return g.creationTime
 }

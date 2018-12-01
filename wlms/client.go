@@ -163,6 +163,10 @@ func (client Client) Game() *Game {
 	return client.game
 }
 
+func (c *Client) LoginTime() time.Time {
+	return c.loginTime
+}
+
 func (client *Client) Disconnect(server Server) {
 	client.conn.Close()
 	client.setState(RECENTLY_DISCONNECTED, server)
