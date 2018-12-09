@@ -61,8 +61,8 @@ type Client struct {
 	// the current connection state.
 	state State
 
-	// the time when the user logged in.
-	loginTime time.Time
+	// time of last message received from user.
+	timeLastMessage time.Time
 
 	// the protocol version used for communication.
 	protocolVersion int
@@ -163,8 +163,8 @@ func (client Client) Game() *Game {
 	return client.game
 }
 
-func (c *Client) LoginTime() time.Time {
-	return c.loginTime
+func (c *Client) TimeLastMessage() time.Time {
+	return c.timeLastMessage
 }
 
 func (client *Client) Disconnect(server Server) {
@@ -232,6 +232,7 @@ func DealWithNewConnection(conn ReadWriteCloserWithIp, server *Server) {
 				return
 			}
 
+			client.timeLastMessage = time.Now()
 			handlerFunc := reflect.ValueOf(client).MethodByName(strings.Join([]string{"Handle_", cmdName}, ""))
 			pkgErr := CmdError(InvalidPacketError{})
 			if handlerFunc.IsValid() {
@@ -535,7 +536,6 @@ func (c *Client) loginDone(server *Server) CmdError {
 		return nil
 	}
 
-	c.loginTime = time.Now()
 	log.Printf("Client %v logged in (%v, version %v, %v)", c.userName, c.buildId, c.protocolVersion, c.permissions)
 
 	c.SendPacket("LOGIN", c.userName, c.permissions.String())
@@ -671,7 +671,7 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 		return CriticalCmdPacketError{"WRONG_INFORMATION"}
 	}
 
-	client.loginTime = oldClient.loginTime
+	client.timeLastMessage = time.Now()
 	client.protocolVersion = oldClient.protocolVersion
 	client.permissions = oldClient.permissions
 	client.userName = oldClient.userName

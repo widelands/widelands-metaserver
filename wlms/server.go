@@ -481,22 +481,22 @@ func (s *Server) mainLoop() {
 			// Games have to be checked before clients so the GAMES_UPDATE
 			// message does not get lost when a client is forced to reconnect
 			s.ForeachGame(func(game *Game) {
-				if game.CreationTime().Before(removeBefore) {
+				if game.TimeLastActivity().Before(removeBefore) {
 					if !game.UsesRelay() {
 						log.Printf("Warning: Removing game %v which has been created at %v",
-							game.Name(), game.CreationTime().Format(timeFormatString))
+							game.Name(), game.TimeLastActivity().Format(timeFormatString))
 					} else {
 						log.Printf("Warning: Removing relay game %v which has been created at %v",
-							game.Name(), game.CreationTime().Format(timeFormatString))
+							game.Name(), game.TimeLastActivity().Format(timeFormatString))
 					}
 					s.RemoveGame(game)
 				}
 			})
 			for e := s.clients.Front(); e != nil; e = e.Next() {
 				client := e.Value.(*Client)
-				if client.buildId != "IRC" && client.LoginTime().Before(removeBefore) {
+				if client.buildId != "IRC" && client.TimeLastMessage().Before(removeBefore) {
 					log.Printf("Warning: Removing client %v which is online since %v",
-						client.Name(), client.LoginTime().Format(timeFormatString))
+						client.Name(), client.TimeLastMessage().Format(timeFormatString))
 					client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 					client.Disconnect(*s)
 				}

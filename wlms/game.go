@@ -38,7 +38,7 @@ type Game struct {
 	buildId   string
 	state     GameState
 	usesRelay bool // True if all network traffic passes through our relay server.
-	creationTime time.Time
+	timeLastActivity time.Time
 }
 
 type GamePinger struct {
@@ -114,6 +114,9 @@ func (game *Game) pingCycle(server *Server) {
 			}
 			first_ping = false
 		}
+		if connected {
+			game.timeLastActivity = time.Now()
+		}
 
 		pingTimeout = server.GamePingTimeout()
 		time.Sleep(server.GamePingTimeout())
@@ -128,7 +131,7 @@ func NewGame(host string, buildId string, server *Server, gameName string, shoul
 		name:         gameName,
 		state:        INITIAL_SETUP,
 		usesRelay:    shouldUseRelay,
-		creationTime: time.Now(),
+		timeLastActivity: time.Now(),
 	}
 	server.AddGame(game)
 
@@ -162,10 +165,12 @@ func (g Game) Host() string {
 }
 
 func (g *Game) AddPlayer(userName string) {
+	g.timeLastActivity = time.Now()
 	g.players[userName] = true
 }
 
 func (g *Game) RemovePlayer(userName string, server *Server) {
+	g.timeLastActivity = time.Now()
 	if userName == g.host {
 		if !g.usesRelay {
 			log.Printf("Host %v leaves self-hosted game '%v'. This ends the game", userName, g.name)
@@ -190,6 +195,6 @@ func (g Game) UsesRelay() bool {
 	return g.usesRelay
 }
 
-func (g Game) CreationTime() time.Time {
-	return g.creationTime
+func (g Game) TimeLastActivity() time.Time {
+	return g.timeLastActivity
 }
