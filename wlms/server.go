@@ -450,6 +450,15 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 
 func (s *Server) mainLoop() {
 	defer s.relay.CloseConnection()
+	// Remove (non-IRC) clients and games that are older than this time.
+	// Normally, I expect this never to remove anything, except for
+	// when bugs / unexpected states make a client/game survive.
+	// The timer interval should be so big that it is unrealistic for
+	// clients/games to stay online for so long
+	maxOnlineTime := 7 * 24 * time.Hour
+	timeFormatString := "2006-01-02 15:04:05"
+	cleanupTicker := time.NewTicker(maxOnlineTime)
+	defer cleanupTicker.Stop()
 	for {
 		select {
 		case conn, ok := <-s.acceptedConnections:
@@ -467,6 +476,31 @@ func (s *Server) mainLoop() {
 			close(s.acceptedConnections)
 			s.serverHasShutdown <- true
 			return
+		case <-cleanupTicker.C:
+			removeBefore := time.Now().Add(-maxOnlineTime)
+			// Games have to be checked before clients so the GAMES_UPDATE
+			// message does not get lost when a client is forced to reconnect
+			s.ForeachGame(func(game *Game) {
+				if game.TimeLastActivity().Before(removeBefore) {
+					if !game.UsesRelay() {
+						log.Printf("Warning: Removing game %v, last ping at %v",
+							game.Name(), game.TimeLastActivity().Format(timeFormatString))
+					} else {
+						log.Printf("Warning: Removing relay game %v, last change at %v",
+							game.Name(), game.TimeLastActivity().Format(timeFormatString))
+					}
+					s.RemoveGame(game)
+				}
+			})
+			for e := s.clients.Front(); e != nil; e = e.Next() {
+				client := e.Value.(*Client)
+				if client.buildId != "IRC" && client.TimeLastMessage().Before(removeBefore) {
+					log.Printf("Warning: Removing client %v, last activity at %v",
+						client.Name(), client.TimeLastMessage().Format(timeFormatString))
+					client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
+					client.Disconnect(*s)
+				}
+			}
 		}
 	}
 }
