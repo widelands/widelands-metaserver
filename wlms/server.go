@@ -455,7 +455,7 @@ func (s *Server) mainLoop() {
 	// when bugs / unexpected states make a client/game survive.
 	// The timer interval should be so big that it is unrealistic for
 	// clients/games to stay online for so long
-	maxOnlineTime := 3 * 24 * time.Hour
+	maxOnlineTime := 7 * 24 * time.Hour
 	timeFormatString := "2006-01-02 15:04:05"
 	cleanupTicker := time.NewTicker(maxOnlineTime)
 	defer cleanupTicker.Stop()
