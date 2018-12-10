@@ -483,10 +483,10 @@ func (s *Server) mainLoop() {
 			s.ForeachGame(func(game *Game) {
 				if game.TimeLastActivity().Before(removeBefore) {
 					if !game.UsesRelay() {
-						log.Printf("Warning: Removing game %v which has been created at %v",
+						log.Printf("Warning: Removing game %v, last ping at %v",
 							game.Name(), game.TimeLastActivity().Format(timeFormatString))
 					} else {
-						log.Printf("Warning: Removing relay game %v which has been created at %v",
+						log.Printf("Warning: Removing relay game %v, last change at %v",
 							game.Name(), game.TimeLastActivity().Format(timeFormatString))
 					}
 					s.RemoveGame(game)
@@ -495,7 +495,7 @@ func (s *Server) mainLoop() {
 			for e := s.clients.Front(); e != nil; e = e.Next() {
 				client := e.Value.(*Client)
 				if client.buildId != "IRC" && client.TimeLastMessage().Before(removeBefore) {
-					log.Printf("Warning: Removing client %v which is online since %v",
+					log.Printf("Warning: Removing client %v, last activity at %v",
 						client.Name(), client.TimeLastMessage().Format(timeFormatString))
 					client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
 					client.Disconnect(*s)
