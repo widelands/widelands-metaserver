@@ -721,7 +721,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 		log.Printf("Starting new game '%v' on relay for host %v", gameName, client.Name())
 		var challenge, response string
 		var success bool
-		if client.permissions == REGISTERED {
+		if client.permissions == REGISTERED || client.permissions == SUPERUSER {
 			challenge, response, success = server.UserDb().GenerateChallengeResponsePairFromUsername(client.userName)
 		} else {
 			challenge, response, success = GenerateChallengeResponsePairFromSecret(client.nonce)
