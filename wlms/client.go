@@ -520,7 +520,7 @@ func (c *Client) findReplaceCandidates(server *Server, isRegisteredOnServer bool
 			// Name not in use
 			return c.loginDone(server)
 		} else if (server.HasClient(c.userName) == server.HasIRCClient(c.userName)) && isRegisteredOnServer {
-			// Name is used on IRC but belongs to a registered user on the  metaserver
+			// Name is used on IRC but belongs to a registered user on the metaserver
 			return c.loginDone(server)
 		}
 		// Name is in use or registered for someone else: Search for a free one
