@@ -627,7 +627,7 @@ func (c *Client) findUnconnectedName(server *Server) {
 		oldClient := server.HasClient(c.userName)
 		if oldClient == nil {
 			// Found a free name
-			if c.protocolVersion >= BUILD20 && c.permissions == REGISTERED {
+			if c.protocolVersion >= BUILD20 && (c.permissions == REGISTERED || c.permissions == SUPERUSER) {
 				c.nonce = server.UserDb().GenerateDowngradedUserNonce(baseName, c.userName)
 			}
 			c.permissions = UNREGISTERED
