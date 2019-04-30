@@ -424,7 +424,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		for {
 			select {
 			case m := <-irc.messagesFromIRC:
-				server.BroadcastToConnectedClients("CHAT", m.nick, m.message, "public")
+				server.BroadcastToConnectedClients("CHAT", "<IRC> "+m.nick, m.message, "public")
 			case nick := <-irc.clientsJoiningIRC:
 				old_client := server.HasIRCClient(nick)
 				if old_client != nil {

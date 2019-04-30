@@ -519,6 +519,9 @@ func (c *Client) findReplaceCandidates(server *Server, isRegisteredOnServer bool
 		if server.HasClient(c.userName) == nil && (isRegisteredOnServer || !server.UserDb().ContainsName(c.userName)) {
 			// Name not in use
 			return c.loginDone(server)
+		} else if (server.HasClient(c.userName) == server.HasIRCClient(c.userName)) && isRegisteredOnServer {
+			// Name is used on IRC but belongs to a registered user on the metaserver
+			return c.loginDone(server)
 		}
 		// Name is in use or registered for someone else: Search for a free one
 		c.findUnconnectedName(server)
@@ -624,7 +627,7 @@ func (c *Client) findUnconnectedName(server *Server) {
 		oldClient := server.HasClient(c.userName)
 		if oldClient == nil {
 			// Found a free name
-			if c.protocolVersion >= BUILD20 && c.permissions == REGISTERED {
+			if c.protocolVersion >= BUILD20 && (c.permissions == REGISTERED || c.permissions == SUPERUSER) {
 				c.nonce = server.UserDb().GenerateDowngradedUserNonce(baseName, c.userName)
 			}
 			c.permissions = UNREGISTERED
@@ -718,7 +721,7 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 		log.Printf("Starting new game '%v' on relay for host %v", gameName, client.Name())
 		var challenge, response string
 		var success bool
-		if client.permissions == REGISTERED {
+		if client.permissions == REGISTERED || client.permissions == SUPERUSER {
 			challenge, response, success = server.UserDb().GenerateChallengeResponsePairFromUsername(client.userName)
 		} else {
 			challenge, response, success = GenerateChallengeResponsePairFromSecret(client.nonce)
