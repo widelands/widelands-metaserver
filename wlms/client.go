@@ -362,17 +362,18 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 		server.BroadcastToIrc(client.Name() + ": " + message)
 	} else {
 		recv_client := server.HasClient(receiver)
+		recv_client_irc := server.HasIRCClient(receiver)
 		if recv_client == nil {
-			if client.protocolVersion >= BUILD20 {
+			if recv_client_irc != nil && recv_client_irc.permissions == IRC {
+				// Bad luck, whispering to IRC is not supported yet
+				client.SendPacket("CHAT", "", "Private messages to IRC users are not supported.", "system")
+			} else if client.protocolVersion >= BUILD20 {
 				client.SendPacket("ERROR", "CHAT", "NO_SUCH_USER")
 			}
 			return nil
+		} else {
+			recv_client.SendPacket("CHAT", client.Name(), message, "private")
 		}
-		if recv_client.permissions == IRC {
-			// Bad luck, whispering to IRC is not supported yet
-			client.SendPacket("CHAT", "", "Private messages to IRC users are not supported.", "system")
-		}
-		recv_client.SendPacket("CHAT", client.Name(), message, "private")
 	}
 	return nil
 }
