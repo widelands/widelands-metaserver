@@ -149,7 +149,7 @@ func (s *Server) RemoveClient(client *Client) {
 func (s Server) HasClient(name string) *Client {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		client := e.Value.(*Client)
-		if client.Name() == name {
+		if client.Name() == name && client.buildId != "IRC" {
 			return client
 		}
 	}
