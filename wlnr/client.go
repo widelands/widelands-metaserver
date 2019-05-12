@@ -99,6 +99,9 @@ func (c *Client) ReadPacket() ([]byte, error) {
 		return length_bytes, error
 	}
 	length := int(length_bytes[0])<<8 | int(length_bytes[1])
+	if length < 2 {
+		return nil, io.ErrUnexpectedEOF
+	}
 	packet := make([]byte, length)
 	packet[0] = length_bytes[0]
 	packet[1] = length_bytes[1]
