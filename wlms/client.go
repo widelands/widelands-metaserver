@@ -99,7 +99,13 @@ type Client struct {
 	// A value != nil indicates that we are currently searching for a free name.
 	// This is different than a relogin after a short network problem
 	replaceCandidates []*Client
+
+	// Wether the client has been announced in the chat and is returned
+	// in client lists
+	wasAnnounced bool
 }
+
+const ANNOUNCE_DELAY time.Duration = 3
 
 type CmdError interface{}
 
@@ -125,7 +131,7 @@ func (c *Client) setState(s State, server Server) {
 		log.Fatal("Unkown state in setState")
 	}
 	c.state = s
-	if need_broadcast {
+	if need_broadcast && s != RECENTLY_DISCONNECTED && c.replaceCandidates == nil {
 		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
 	}
 }
@@ -136,6 +142,10 @@ func (client Client) Name() string {
 
 func (client Client) Nonce() string {
 	return client.nonce
+}
+
+func (client Client) Permissions() Permissions {
+	return client.permissions
 }
 
 func (client Client) PendingLogin() *Client {
@@ -170,6 +180,26 @@ func (c *Client) TimeLastMessage() time.Time {
 func (client *Client) Disconnect(server Server) {
 	client.conn.Close()
 	client.setState(RECENTLY_DISCONNECTED, server)
+}
+
+func (client *Client) Announce(server Server) {
+	time.Sleep(ANNOUNCE_DELAY * time.Second)
+	client.AnnounceNow(server)
+}
+
+func (client *Client) AnnounceNow(server Server) {
+	if client.wasAnnounced && !server.HasClientObject(client) {
+		// Client was connected but is no longer. Send "removed" messages
+		server.BroadcastToIrcFromUser(client.Name()+" has left the lobby", client.Name())
+		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+		client.wasAnnounced = false
+	} else if !client.wasAnnounced && server.HasClientObject(client) {
+		// Client was not connected but is now. Send "added" messages
+		server.BroadcastToIrc(client.Name() + " has joined the lobby.")
+		server.BroadcastToConnectedClients("CLIENTS_UPDATE")
+		client.wasAnnounced = true
+	}
+	// All other cases: Nothing to do, it was only a short connect/disconnect
 }
 
 func (client *Client) SendPacket(data ...interface{}) {
@@ -300,6 +330,7 @@ func newClient(r ReadWriteCloserWithIp) *Client {
 		startToPingTimer:  time.NewTimer(time.Hour * 1),
 		timeoutTimer:      time.NewTimer(time.Hour * 1),
 		replaceCandidates: nil,
+		wasAnnounced:      false,
 	}
 	return client
 }
@@ -358,6 +389,9 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 	}
 
 	if len(receiver) == 0 {
+		if !client.wasAnnounced {
+			client.AnnounceNow(*server)
+		}
 		server.BroadcastToConnectedClients("CHAT", client.Name(), message, "public")
 		server.BroadcastToIrc(client.Name() + ": " + message)
 	} else {
@@ -800,18 +834,21 @@ func (client *Client) Handle_GAME_DISCONNECT(server *Server, pkg *packet.Packet)
 func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdError {
 	var nrClients int = 0
 	nFields := 4
-	if client.protocolVersion >= BUILD20 {
-		nrClients = server.NrActiveClients()
-	} else {
-		// Hide IRC users in the lobby of build19 clients. They would appear
-		// at the top of the player list, confusing the user
-		server.ForeachActiveClient(func(otherClient *Client) {
-			if otherClient.permissions != IRC {
-				nrClients++
-			}
-		})
+	if client.protocolVersion < BUILD20 {
 		nFields = 5
 	}
+	server.ForeachActiveClient(func(otherClient *Client) {
+		// Hide IRC users in the lobby of build19 clients. They would appear
+		// at the top of the player list, confusing the user
+		if client.protocolVersion == BUILD19 && otherClient.permissions == IRC {
+			return
+		}
+		// Only list clients that have been announced
+		if !otherClient.wasAnnounced && otherClient != client {
+			return
+		}
+		nrClients++
+	})
 	data := make([]interface{}, 2+nrClients*nFields)
 
 	data[0] = "CLIENTS"
@@ -819,6 +856,9 @@ func (client *Client) Handle_CLIENTS(server *Server, pkg *packet.Packet) CmdErro
 	n := 2
 	server.ForeachActiveClient(func(otherClient *Client) {
 		if client.protocolVersion == BUILD19 && otherClient.permissions == IRC {
+			return
+		}
+		if !otherClient.wasAnnounced && otherClient != client {
 			return
 		}
 		data[n+0] = otherClient.userName
