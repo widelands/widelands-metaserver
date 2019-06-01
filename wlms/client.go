@@ -49,7 +49,16 @@ const (
 const (
 	BUILD19 int = 0
 	BUILD20 int = 5
+	BUILD21 int = 6
 )
+
+func isSupportedVersion(version int) bool {
+	switch version {
+	case BUILD19, BUILD20, BUILD21:
+		return true
+	}
+	return false
+}
 
 type Client struct {
 	// The connection (net.Conn most likely) that let us talk to the other site.
@@ -471,7 +480,7 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 	log.Printf("Client %v wants to log in (%v, version %v, registered=%v)", c.userName, c.buildId, c.protocolVersion, isRegisteredOnServer)
 
 	// Check protocol version
-	if c.protocolVersion != BUILD19 && c.protocolVersion != BUILD20 {
+	if !isSupportedVersion(c.protocolVersion) {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
 
