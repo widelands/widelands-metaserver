@@ -106,8 +106,8 @@ func (s *Server) NewGamePinger(ip string, ping_timeout time.Duration) *GamePinge
 }
 
 func (s *Server) AddClient(client *Client) {
-	if client.buildId != "IRC" {
-		s.BroadcastToIrc(client.Name() + " has joined the lobby.")
+	if client.Permissions() != IRC {
+		go client.Announce(*s)
 	}
 	s.clients.PushBack(client)
 }
@@ -136,9 +136,9 @@ func (s *Server) RemoveClient(client *Client) {
 	// Now remove the client for good if it is around.
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client) == client {
-			if client.buildId != "IRC" {
+			if client.Permissions() != IRC {
 				log.Printf("Removing client %s", client.Name())
-				s.BroadcastToIrcFromUser(client.Name()+" has left the lobby", client.Name())
+				go client.Announce(*s)
 			}
 			s.clients.Remove(e)
 			break
@@ -154,6 +154,16 @@ func (s Server) HasClient(name string) *Client {
 		}
 	}
 	return nil
+}
+
+func (s Server) HasClientObject(c *Client) bool {
+	for e := s.clients.Front(); e != nil; e = e.Next() {
+		client := e.Value.(*Client)
+		if client == c {
+			return true
+		}
+	}
+	return false
 }
 
 func (s Server) HasIRCClient(name string) *Client {
