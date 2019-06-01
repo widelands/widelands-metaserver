@@ -41,6 +41,7 @@ type State int
 
 const (
 	HANDSHAKE State = iota
+	CHECK_PWD
 	CONNECTED
 	RECENTLY_DISCONNECTED
 )
@@ -510,6 +511,31 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 	return c.findReplaceCandidates(server, isRegisteredOnServer)
 }
 
+func (c *Client) Handle_CHECK_PWD(server *Server, pkg *packet.Packet) CmdError {
+	if c.state == CONNECTED {
+		// Client is already connected? Then LOGIN isn't permitted
+		return CriticalCmdPacketError{"ALREADY_LOGGED_IN"}
+	}
+	if err := pkg.Unpack(&c.protocolVersion, &c.userName, &c.buildId); err != nil {
+		return CriticalCmdPacketError{err.Error()}
+	}
+	log.Printf("Client %v wants to check its password (%v, version %v)", c.userName, c.buildId, c.protocolVersion)
+
+	// Check protocol version
+	if c.protocolVersion < BUILD21 {
+		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
+	}
+
+	// Check if registered. If it is, check credentials. If invalid, abort.
+	if !server.UserDb().ContainsName(c.userName) {
+		return CriticalCmdPacketError{"WRONG_PASSWORD"}
+	}
+	// Send a challenge for secure passwort transmission
+	c.sendChallenge(server)
+	c.state = CHECK_PWD
+	return nil
+}
+
 func (c *Client) sendChallenge(server *Server) {
 	// The nonce is empty when using challenge-response. Use it to store the response
 	var challenge string
@@ -537,6 +563,10 @@ func (c *Client) Handle_PWD_CHALLENGE(server *Server, pkg *packet.Packet) CmdErr
 		c.permissions = server.UserDb().Permissions(c.userName)
 		c.nonce = server.UserDb().GenerateDowngradedUserNonce(c.userName, c.userName)
 		return c.findReplaceCandidates(server, true)
+	case CHECK_PWD:
+		c.state = HANDSHAKE
+		permissions := server.UserDb().Permissions(c.userName)
+		c.SendPacket("PWD_OK", c.userName, permissions.String())
 	default:
 		c.SendPacket("ERROR", "PWD_CHALLENGE", "Invalid connection state")
 		c.Disconnect(*server)
