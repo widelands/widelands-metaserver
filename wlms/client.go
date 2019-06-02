@@ -347,11 +347,12 @@ func newClient(r ReadWriteCloserWithIp) *Client {
 
 func NewIRCClient(nick string) *Client {
 	client := &Client{
-		state:       CONNECTED,
-		permissions: IRC,
-		userName:    nick,
-		buildId:     "IRC",
-		nonce:       "irc",
+		state:        CONNECTED,
+		permissions:  IRC,
+		userName:     nick,
+		buildId:      "IRC",
+		nonce:        "irc",
+		wasAnnounced: true,
 	}
 	return client
 }
