@@ -437,8 +437,10 @@ func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
 	case "kick":
 		recv_client := server.HasClient(params)
 		if recv_client != nil {
+			server.AddBannedClient(recv_client)
 			recv_client.Disconnect(*server)
 			server.RemoveClient(recv_client)
+			client.SendPacket("CHAT", "", "Banning the IP of the user for 24 hours.", "system")
 			return nil
 		}
 		game := server.HasGame(params)
@@ -459,15 +461,9 @@ func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
 			return nil
 		}
 	case "warn":
-		/*
-			    TODOs:
-		/help   does not work
-		INVALID_PARAMETERS
-		/kick works but user immediately reconnects
-		*/
 		parts := strings.SplitN(params, " ", 2)
 		if len(parts) != 2 {
-			return CmdPacketError{"INVALID_PARAMETERS"}
+			return CmdPacketError{"INVALID_CMD_PARAMETERS"}
 		}
 		recv_client := server.HasClient(parts[0])
 		recv_client_irc := server.HasIRCClient(parts[0])
@@ -559,6 +555,15 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 			return CriticalCmdPacketError{err.Error()}
 		}
 		c.nonce = nonce
+	}
+
+	// Check if the user has been banned
+	if server.IsBannedClient(c) {
+		if c.protocolVersion < BUILD21 {
+			return CriticalCmdPacketError{"WRONG_PASSWORD"}
+		} else {
+			return CriticalCmdPacketError{"BANNED"}
+		}
 	}
 
 	// Check if registered. If it is, check credentials. If invalid, abort.
@@ -797,6 +802,15 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 			return CriticalCmdPacketError{err.Error()}
 		}
 		nonce = n
+	}
+
+	// Check if the user has been banned
+	if server.IsBannedClient(client) {
+		if client.protocolVersion < BUILD21 {
+			return CriticalCmdPacketError{"WRONG_PASSWORD"}
+		} else {
+			return CriticalCmdPacketError{"BANNED"}
+		}
 	}
 
 	oldClient := server.HasClient(userName)
