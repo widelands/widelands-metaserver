@@ -96,6 +96,32 @@ func (client *ClientRPC) CreateGame(name string, hostPassword string) bool {
 	return success
 }
 
+func (client *ClientRPC) RemoveGame(name string) bool {
+	// Tell relay to remove game
+	success := false
+	data := GameData{
+		Name:     name,
+		Password: "",
+	}
+	for i := 0; i < 2; i++ {
+		err := client.relay.Call("ServerRPCMethods.RemoveGame", data, &success)
+		if err == nil {
+			break
+		}
+		if err == rpc.ErrShutdown {
+			if !client.connect() {
+				log.Printf("ClientRPC: Lost connection to relay and are unable to reconnect")
+				return false
+			}
+			log.Printf("ClientRPC: Lost connection to relay but was able to reconnect")
+		} else {
+			log.Printf("ClientRPC  error: %v", err)
+			return false
+		}
+	}
+	return success
+}
+
 // GameConnected is called by the relay over rpc when a host connected to a game.
 func (client *ClientRPCMethods) GameConnected(in *GameData, response *bool) (err error) {
 	client.client.callback.GameConnected(in.Name)

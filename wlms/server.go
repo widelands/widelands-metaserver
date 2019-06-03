@@ -364,6 +364,15 @@ func (server *Server) RelayCreateGame(name string, password string) bool {
 	}
 }
 
+func (server *Server) RelayRemoveGame(name string) bool {
+	if !server.relay.RemoveGame(name) {
+		log.Println("ERROR: Told to remove game %s on relay but unable to do so.")
+		return false
+	} else {
+		return true
+	}
+}
+
 // The relay informs us that the game with the given name has been connected by the host
 func (server *Server) GameConnected(name string) {
 	log.Printf("Relay notifies us that the host connected to its game '%s'", name)

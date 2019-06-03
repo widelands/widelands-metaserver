@@ -41,6 +41,19 @@ func (s *Server) CreateGame(name, password string) bool {
 	return true
 }
 
+func (s *Server) RemoveGame(name string) bool {
+	for e := s.games.Front(); e != nil; e = e.Next() {
+		g := e.Value.(*Game)
+		if g.Name() == name {
+			log.Printf("Removing game '%v' as told by metaserver", name)
+			g.Shutdown()
+			return true
+		}
+	}
+	log.Printf("Error: Did not find game '%v' to remove as told by metaserver", name)
+	return false
+}
+
 func (s *Server) GameConnected(name string) {
 	s.wlms.GameConnected(name)
 }
@@ -50,7 +63,7 @@ func (s *Server) RemoveGameIfNoHostIsConnected(name string) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		g := e.Value.(*Game)
 		if g.Name() == name && g.host == nil {
-			log.Printf("Removing game %v since no host connected to it", name)
+			log.Printf("Removing game '%v' since no host connected to it", name)
 			s.wlms.GameClosed(name)
 			s.games.Remove(e)
 			return
@@ -58,7 +71,7 @@ func (s *Server) RemoveGameIfNoHostIsConnected(name string) {
 	}
 }
 
-func (s *Server) RemoveGame(game *Game) {
+func (s *Server) RemoveGameObject(game *Game) {
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Game) == game {
 			s.wlms.GameClosed(game.Name())

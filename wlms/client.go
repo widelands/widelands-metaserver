@@ -423,6 +423,73 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 	return nil
 }
 
+func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
+	var cmd, params string
+	if err := pkg.Unpack(&cmd, &params); err != nil {
+		return CmdPacketError{err.Error()}
+	}
+
+	if client.permissions != SUPERUSER {
+		return CmdPacketError{"DEFICIENT_PERMISSION"}
+	}
+
+	switch cmd {
+	case "kick":
+		recv_client := server.HasClient(params)
+		if recv_client != nil {
+			recv_client.Disconnect(*server)
+			server.RemoveClient(recv_client)
+			return nil
+		}
+		game := server.HasGame(params)
+		if game != nil {
+			if game.UsesRelay() {
+				server.RelayRemoveGame(params)
+			}
+			server.RemoveGame(game)
+			return nil
+		}
+		recv_client_irc := server.HasIRCClient(params)
+		if recv_client_irc != nil && recv_client_irc.permissions == IRC {
+			client.SendPacket("CHAT", "", "Kicking IRC users is not supported.", "system")
+			return nil
+		}
+		if client.protocolVersion >= BUILD20 {
+			client.SendPacket("ERROR", "CMD", "NO_SUCH_USER")
+			return nil
+		}
+	case "warn":
+		/*
+			    TODOs:
+		/help   does not work
+		INVALID_PARAMETERS
+		/kick works but user immediately reconnects
+		*/
+		parts := strings.SplitN(params, " ", 2)
+		if len(parts) != 2 {
+			return CmdPacketError{"INVALID_PARAMETERS"}
+		}
+		recv_client := server.HasClient(parts[0])
+		recv_client_irc := server.HasIRCClient(parts[0])
+		if recv_client == nil {
+			if recv_client_irc != nil && recv_client_irc.permissions == IRC {
+				// Bad luck, whispering to IRC is not supported yet
+				client.SendPacket("CHAT", "", "Private messages to IRC users are not supported.", "system")
+			} else if client.protocolVersion >= BUILD20 {
+				client.SendPacket("ERROR", "CMD", "NO_SUCH_USER")
+			}
+			return nil
+		} else {
+			recv_client.SendPacket("CHAT", "", parts[1], "system")
+		}
+
+	default:
+		return CmdPacketError{"UNKNOWN_COMMAND"}
+	}
+
+	return nil
+}
+
 func (client *Client) Handle_MOTD(server *Server, pkg *packet.Packet) CmdError {
 	var message string
 	if err := pkg.Unpack(&message); err != nil {
