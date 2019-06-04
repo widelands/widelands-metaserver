@@ -119,7 +119,7 @@ func (s *Server) RemoveClient(client *Client) {
 	cntIRC := 0
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Client).Name() == client.Name() {
-			if e.Value.(*Client).buildId == "IRC" {
+			if e.Value.(*Client).Permissions() == IRC {
 				cntIRC++
 			} else {
 				cntGame++
@@ -149,7 +149,7 @@ func (s *Server) RemoveClient(client *Client) {
 func (s Server) HasClient(name string) *Client {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		client := e.Value.(*Client)
-		if client.Name() == name && client.buildId != "IRC" {
+		if client.Name() == name && client.Permissions() != IRC {
 			return client
 		}
 	}
@@ -169,7 +169,7 @@ func (s Server) HasClientObject(c *Client) bool {
 func (s Server) HasIRCClient(name string) *Client {
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		client := e.Value.(*Client)
-		if client.Name() == name && client.buildId == "IRC" {
+		if client.Name() == name && client.Permissions() == IRC {
 			return client
 		}
 	}
@@ -504,7 +504,7 @@ func (s *Server) mainLoop() {
 			})
 			for e := s.clients.Front(); e != nil; e = e.Next() {
 				client := e.Value.(*Client)
-				if client.buildId != "IRC" && client.TimeLastMessage().Before(removeBefore) {
+				if client.Permissions() != IRC && client.TimeLastMessage().Before(removeBefore) {
 					log.Printf("Warning: Removing client %v, last activity at %v",
 						client.Name(), client.TimeLastMessage().Format(timeFormatString))
 					client.SendPacket("DISCONNECT", "CLIENT_TIMEOUT")
