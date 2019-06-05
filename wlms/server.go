@@ -241,6 +241,12 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 	}
 }
 
+func (s Server) AddKickedClient(c *Client) {
+	ip := c.conn.RemoteAddr().(*net.TCPAddr).IP.String()
+	log.Printf("Kicking IP %v for 5 minutes", ip)
+	s.banned.PushBack(&BannedIP{ip, time.Now().Add(5 * time.Minute)})
+}
+
 func (s Server) AddBannedClient(c *Client) {
 	ip := c.conn.RemoteAddr().(*net.TCPAddr).IP.String()
 	log.Printf("Banning IP %v for 24 hours", ip)

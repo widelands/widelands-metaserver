@@ -437,10 +437,10 @@ func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
 	case "kick":
 		recv_client := server.HasClient(params)
 		if recv_client != nil {
-			server.AddBannedClient(recv_client)
+			server.AddKickedClient(recv_client)
 			recv_client.Disconnect(*server)
 			server.RemoveClient(recv_client)
-			client.SendPacket("CHAT", "", "Banning the IP of the user for 24 hours.", "system")
+			client.SendPacket("CHAT", "", "Kicked the user for 5 minutes.", "system")
 			return nil
 		}
 		game := server.HasGame(params)
@@ -454,6 +454,24 @@ func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
 		recv_client_irc := server.HasIRCClient(params)
 		if recv_client_irc != nil && recv_client_irc.permissions == IRC {
 			client.SendPacket("CHAT", "", "Kicking IRC users is not supported.", "system")
+			return nil
+		}
+		if client.protocolVersion >= BUILD20 {
+			client.SendPacket("ERROR", "CMD", "NO_SUCH_USER")
+			return nil
+		}
+	case "ban":
+		recv_client := server.HasClient(params)
+		if recv_client != nil {
+			server.AddBannedClient(recv_client)
+			recv_client.Disconnect(*server)
+			server.RemoveClient(recv_client)
+			client.SendPacket("CHAT", "", "Banning the IP of the user for 24 hours.", "system")
+			return nil
+		}
+		recv_client_irc := server.HasIRCClient(params)
+		if recv_client_irc != nil && recv_client_irc.permissions == IRC {
+			client.SendPacket("CHAT", "", "Banning IRC users is not supported.", "system")
 			return nil
 		}
 		if client.protocolVersion >= BUILD20 {
