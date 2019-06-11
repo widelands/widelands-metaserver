@@ -72,7 +72,7 @@ func (server *ServerRPC) callClientMethod(action, gameName string) {
 		// Probably there never was a connection, try to create one now
 		// Isn't done in the constructor since we have a circular dependency between
 		// relay and metaserver
-		if (!server.connect()) {
+		if !server.connect() {
 			return
 		}
 	}
@@ -116,6 +116,17 @@ func (serverM *ServerRPCMethods) NewGame(in *GameData, success *bool) error {
 	ret := serverM.server.callback.CreateGame(in.Name, in.Password)
 	if ret != true {
 		return errors.New("Game already exists")
+	}
+	*success = true
+	return nil
+}
+
+// NewGame is called by the rpc server when the metaserver wants to remove a existing game.
+// Calls the respective method of the ServerCallback given on construction.
+func (serverM *ServerRPCMethods) RemoveGame(in *GameData, success *bool) error {
+	ret := serverM.server.callback.RemoveGame(in.Name)
+	if ret != true {
+		return errors.New("Game does not exist")
 	}
 	*success = true
 	return nil

@@ -423,6 +423,87 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 	return nil
 }
 
+func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
+	var cmd, params string
+	if err := pkg.Unpack(&cmd, &params); err != nil {
+		return CmdPacketError{err.Error()}
+	}
+
+	if client.permissions != SUPERUSER {
+		return CmdPacketError{"DEFICIENT_PERMISSION"}
+	}
+
+	switch cmd {
+	case "kick":
+		recv_client := server.HasClient(params)
+		if recv_client != nil {
+			server.AddKickedClient(recv_client)
+			recv_client.Disconnect(*server)
+			server.RemoveClient(recv_client)
+			client.SendPacket("CHAT", "", "Kicked the user for 5 minutes.", "system")
+			return nil
+		}
+		game := server.HasGame(params)
+		if game != nil {
+			if game.UsesRelay() {
+				server.RelayRemoveGame(params)
+			}
+			server.RemoveGame(game)
+			return nil
+		}
+		recv_client_irc := server.HasIRCClient(params)
+		if recv_client_irc != nil && recv_client_irc.permissions == IRC {
+			client.SendPacket("CHAT", "", "Kicking IRC users is not supported.", "system")
+			return nil
+		}
+		if client.protocolVersion >= BUILD20 {
+			client.SendPacket("ERROR", "CMD", "NO_SUCH_USER")
+			return nil
+		}
+	case "ban":
+		recv_client := server.HasClient(params)
+		if recv_client != nil {
+			server.AddBannedClient(recv_client)
+			recv_client.Disconnect(*server)
+			server.RemoveClient(recv_client)
+			client.SendPacket("CHAT", "", "Banning the IP of the user for 24 hours.", "system")
+			return nil
+		}
+		recv_client_irc := server.HasIRCClient(params)
+		if recv_client_irc != nil && recv_client_irc.permissions == IRC {
+			client.SendPacket("CHAT", "", "Banning IRC users is not supported.", "system")
+			return nil
+		}
+		if client.protocolVersion >= BUILD20 {
+			client.SendPacket("ERROR", "CMD", "NO_SUCH_USER")
+			return nil
+		}
+	case "warn":
+		parts := strings.SplitN(params, " ", 2)
+		if len(parts) != 2 {
+			return CmdPacketError{"INVALID_CMD_PARAMETERS"}
+		}
+		recv_client := server.HasClient(parts[0])
+		recv_client_irc := server.HasIRCClient(parts[0])
+		if recv_client == nil {
+			if recv_client_irc != nil && recv_client_irc.permissions == IRC {
+				// Bad luck, whispering to IRC is not supported yet
+				client.SendPacket("CHAT", "", "Private messages to IRC users are not supported.", "system")
+			} else if client.protocolVersion >= BUILD20 {
+				client.SendPacket("ERROR", "CMD", "NO_SUCH_USER")
+			}
+			return nil
+		} else {
+			recv_client.SendPacket("CHAT", "", parts[1], "system")
+		}
+
+	default:
+		return CmdPacketError{"UNKNOWN_COMMAND"}
+	}
+
+	return nil
+}
+
 func (client *Client) Handle_MOTD(server *Server, pkg *packet.Packet) CmdError {
 	var message string
 	if err := pkg.Unpack(&message); err != nil {
@@ -492,6 +573,15 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 			return CriticalCmdPacketError{err.Error()}
 		}
 		c.nonce = nonce
+	}
+
+	// Check if the user has been banned
+	if server.IsBannedClient(c) {
+		if c.protocolVersion < BUILD21 {
+			return CriticalCmdPacketError{"WRONG_PASSWORD"}
+		} else {
+			return CriticalCmdPacketError{"BANNED"}
+		}
 	}
 
 	// Check if registered. If it is, check credentials. If invalid, abort.
@@ -730,6 +820,15 @@ func (client *Client) Handle_RELOGIN(server *Server, pkg *packet.Packet) CmdErro
 			return CriticalCmdPacketError{err.Error()}
 		}
 		nonce = n
+	}
+
+	// Check if the user has been banned
+	if server.IsBannedClient(client) {
+		if client.protocolVersion < BUILD21 {
+			return CriticalCmdPacketError{"WRONG_PASSWORD"}
+		} else {
+			return CriticalCmdPacketError{"BANNED"}
+		}
 	}
 
 	oldClient := server.HasClient(userName)

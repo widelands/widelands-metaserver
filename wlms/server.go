@@ -16,6 +16,11 @@ type ReadWriteCloserWithIp interface {
 	RemoteAddr() net.Addr
 }
 
+type BannedIP struct {
+	ip    string
+	until time.Time
+}
+
 type Server struct {
 	acceptedConnections  chan ReadWriteCloserWithIp
 	shutdownServer       chan bool
@@ -39,6 +44,9 @@ type Server struct {
 	relay               relayinterface.Client
 	// The IP addresses of the wlnr instance
 	relay_address AddressPair
+
+	// A list of IPs that has been banned for some time
+	banned *list.List
 }
 
 type GamePingerFactory interface {
@@ -233,6 +241,35 @@ func (s Server) ForeachActiveClient(callback func(*Client)) {
 	}
 }
 
+func (s Server) AddKickedClient(c *Client) {
+	ip := c.conn.RemoteAddr().(*net.TCPAddr).IP.String()
+	log.Printf("Kicking IP %v for 5 minutes", ip)
+	s.banned.PushBack(&BannedIP{ip, time.Now().Add(5 * time.Minute)})
+}
+
+func (s Server) AddBannedClient(c *Client) {
+	ip := c.conn.RemoteAddr().(*net.TCPAddr).IP.String()
+	log.Printf("Banning IP %v for 24 hours", ip)
+	s.banned.PushBack(&BannedIP{ip, time.Now().Add(24 * time.Hour)})
+}
+
+func (s Server) IsBannedClient(c *Client) bool {
+	ip := c.conn.RemoteAddr().(*net.TCPAddr).IP.String()
+	now := time.Now()
+	for e := s.banned.Front(); e != nil; {
+		entry := e.Value.(*BannedIP)
+		e2 := e
+		e = e.Next()
+		if entry.until.Before(now) {
+			log.Printf("IP %v is no longer banned", entry.ip)
+			s.banned.Remove(e2)
+		} else if entry.ip == ip {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) AddGame(game *Game) {
 	s.games.PushBack(game)
 	s.BroadcastToConnectedClients("GAMES_UPDATE")
@@ -364,6 +401,15 @@ func (server *Server) RelayCreateGame(name string, password string) bool {
 	}
 }
 
+func (server *Server) RelayRemoveGame(name string) bool {
+	if !server.relay.RemoveGame(name) {
+		log.Println("ERROR: Told to remove game %s on relay but unable to do so.")
+		return false
+	} else {
+		return true
+	}
+}
+
 // The relay informs us that the game with the given name has been connected by the host
 func (server *Server) GameConnected(name string) {
 	log.Printf("Relay notifies us that the host connected to its game '%s'", name)
@@ -405,6 +451,7 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 		clientForgetTimeout:    time.Minute * 5,
 		irc:                    irc,
 		relay_address:          AddressPair{"", ""},
+		banned:                 list.New(),
 	}
 	// Get the IP addresses of our domain
 	ips, err := net.LookupIP(hostname)

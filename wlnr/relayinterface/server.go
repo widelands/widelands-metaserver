@@ -15,4 +15,5 @@ type Server interface {
 // the metaserver sends a command.
 type ServerCallback interface {
 	CreateGame(name string, password string) bool
+	RemoveGame(name string) bool
 }

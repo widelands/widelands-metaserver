@@ -8,6 +8,10 @@ type Client interface {
 	// The given password protects the host-position in the new game.
 	// Fails if there is no relay or the game already exists.
 	CreateGame(name string, password string) bool
+	// Closes the game on the relay, removing all state of it
+	// and closing all network connections.
+	// Fails if there is no game with this name.
+	RemoveGame(name string) bool
 	// Closes connection to the relay.
 	CloseConnection()
 }

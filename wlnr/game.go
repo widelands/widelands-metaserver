@@ -75,7 +75,7 @@ func (game *Game) Shutdown() {
 		game.DisconnectClient(game.clients.Front().Value.(*Client), "NORMAL")
 	}
 	game.DisconnectClient(game.host, "NORMAL")
-	game.server.RemoveGame(game)
+	game.server.RemoveGameObject(game)
 }
 
 func (game *Game) addClient(client *Client, version uint8, password string) {
