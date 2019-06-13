@@ -114,12 +114,15 @@ func NewMySqlDatabase(database, user, password, table string) *SqlDatabase {
 	if err != nil {
 		log.Fatal("Could not connect to database.")
 	}
+	if con.Ping() != nil {
+		log.Fatal("Database closed connection immediately.")
+	}
 	return &SqlDatabase{con}
 }
 
 func (db *SqlDatabase) Close() {
 	if db.db != nil {
-		db.Close()
+		db.db.Close()
 		db.db = nil
 	}
 }

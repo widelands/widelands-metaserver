@@ -6,6 +6,9 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -349,6 +352,14 @@ func RunServer(db UserDb, irc *IRCBridgerChannels, hostname string) {
 	}()
 
 	server := CreateServerUsing(C, db, irc, hostname)
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		log.Printf("Signal received, initiating shutdown")
+		server.InitiateShutdown()
+	}()
 
 	server.WaitTillShutdown()
 }

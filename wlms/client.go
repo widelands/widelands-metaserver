@@ -913,7 +913,12 @@ func (client *Client) Handle_GAME_OPEN(server *Server, pkg *packet.Packet) CmdEr
 		}
 		game := NewGame(client.userName, client.buildId, server, gameName, true /* use relay */)
 		ips := server.GetRelayAddresses()
-		client.SendPacket("GAME_OPEN", challenge, ips.ipv6, true, ips.ipv4)
+		// Send that IP address version first the client is using
+		if client.conn.RemoteAddr().(*net.TCPAddr).IP.To4() != nil {
+			client.SendPacket("GAME_OPEN", challenge, ips.ipv4, true, ips.ipv6)
+		} else {
+			client.SendPacket("GAME_OPEN", challenge, ips.ipv6, true, ips.ipv4)
+		}
 		client.setGame(game, server)
 	}
 
@@ -945,7 +950,12 @@ func (client *Client) Handle_GAME_CONNECT(server *Server, pkg *packet.Packet) Cm
 	} else {
 		// Newer client which possibly supports two IPs and uses the relay
 		ips := server.GetRelayAddresses()
-		client.SendPacket("GAME_CONNECT", ips.ipv6, true, ips.ipv4)
+		// Send that IP address version first the client is using
+		if client.conn.RemoteAddr().(*net.TCPAddr).IP.To4() != nil {
+			client.SendPacket("GAME_CONNECT", ips.ipv4, true, ips.ipv6)
+		} else {
+			client.SendPacket("GAME_CONNECT", ips.ipv6, true, ips.ipv4)
+		}
 	}
 	client.setGame(game, server)
 	return nil
