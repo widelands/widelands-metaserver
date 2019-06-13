@@ -122,7 +122,7 @@ func NewMySqlDatabase(database, user, password, table string) *SqlDatabase {
 
 func (db *SqlDatabase) Close() {
 	if db.db != nil {
-		db.Close()
+		db.db.Close()
 		db.db = nil
 	}
 }
