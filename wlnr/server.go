@@ -5,6 +5,9 @@ import (
 	"github.com/widelands/widelands_metaserver/wlnr/relayinterface"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 type Server struct {
@@ -113,6 +116,14 @@ func RunServer() {
 	go server.mainLoop()
 
 	log.Println("The client ids are only unique within one game. Id=1 is host")
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		log.Printf("Signal received, initiating shutdown")
+		server.InitiateShutdown()
+	}()
 
 	server.WaitTillShutdown()
 	return
