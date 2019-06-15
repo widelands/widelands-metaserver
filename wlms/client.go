@@ -437,6 +437,10 @@ func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
 	case "kick":
 		recv_client := server.HasClient(params)
 		if recv_client != nil {
+			if recv_client.permissions == SUPERUSER {
+				client.SendPacket("CHAT", "", "Kicking admin users is not supported.", "system")
+				return nil
+			}
 			server.AddKickedClient(recv_client)
 			recv_client.Disconnect(*server)
 			server.RemoveClient(recv_client)
@@ -463,6 +467,10 @@ func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
 	case "ban":
 		recv_client := server.HasClient(params)
 		if recv_client != nil {
+			if recv_client.permissions == SUPERUSER {
+				client.SendPacket("CHAT", "", "Banning admin users is not supported.", "system")
+				return nil
+			}
 			server.AddBannedClient(recv_client)
 			recv_client.Disconnect(*server)
 			server.RemoveClient(recv_client)
