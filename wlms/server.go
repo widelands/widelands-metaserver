@@ -443,6 +443,32 @@ func (server *Server) GameClosed(name string) {
 	server.RemoveGame(game)
 }
 
+// The current status has been requested over RPC
+func (s *Server) Status() *relayinterface.ServerStatus {
+	users := 0
+	for e := s.clients.Front(); e != nil; e = e.Next() {
+		c := e.Value.(*Client)
+		if c.State() == CONNECTED && c.Permissions() != IRC {
+			users++
+		}
+	}
+	games := 0
+	openGames := 0
+	for e := s.games.Front(); e != nil; e = e.Next() {
+		g := e.Value.(*Game)
+		games++
+		if g.State() == CONNECTABLE {
+			openGames++
+		}
+	}
+
+	return &relayinterface.ServerStatus{
+		NClients:   users,
+		NGames:     games,
+		NOpenGames: openGames,
+		}
+}
+
 func (server *Server) GetRelayAddresses() AddressPair {
 	return server.relay_address
 }

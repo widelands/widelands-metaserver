@@ -143,3 +143,9 @@ func (client *ClientRPCMethods) GameClosed(in *GameData, response *bool) (err er
 	client.client.callback.GameClosed(in.Name)
 	return nil
 }
+
+// GameClosed is called by the relay over rpc when a game has ended.
+func (client *ClientRPCMethods) Status(in *string, response *ServerStatus) (err error) {
+	*response = *client.client.callback.Status()
+	return nil
+}

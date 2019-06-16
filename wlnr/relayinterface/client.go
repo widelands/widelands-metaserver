@@ -1,5 +1,11 @@
 package relayinterface
 
+type ServerStatus struct {
+	NClients   int // does not count IRC users
+	NGames     int // contains nOpenGames
+	NOpenGames int
+}
+
 // Client is an interface for communicating with the relay server.
 // Implementing structs should forward the method calls in this
 // interface to the relay server.
@@ -23,4 +29,6 @@ type ClientCallback interface {
 	GameConnected(name string)
 	// The relay notifies that the game with the given name has been closed on the relay.
 	GameClosed(name string)
+	// Request the current status, e.g., number of active users and games.
+	Status() *ServerStatus
 }
