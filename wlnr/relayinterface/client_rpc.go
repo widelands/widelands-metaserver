@@ -4,6 +4,7 @@ import (
 	"log"
 	"net"
 	"net/rpc"
+	"net/rpc/jsonrpc"
 	"time"
 )
 
@@ -46,7 +47,16 @@ func NewClientRPC(callback ClientCallback) Client {
 	}
 
 	rpc.Register(clientMethods)
-	go rpc.Accept(rpcLn)
+
+	go func() {
+		for {
+			conn, err := rpcLn.Accept()
+			if err != nil {
+				continue
+			}
+			go jsonrpc.ServeConn(conn)
+		}
+	}()
 
 	return client
 }
@@ -58,7 +68,7 @@ func (client *ClientRPC) connect() bool {
 		log.Printf("Unable to connect to relay server at localhost: %v", err)
 		return false
 	}
-	client.relay = rpc.NewClient(connection)
+	client.relay = jsonrpc.NewClient(connection)
 	log.Println("Connected to relay server")
 	return true
 }
