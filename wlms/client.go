@@ -1031,6 +1031,19 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError 
 	nrGames := server.NrGames()
 	data := make([]interface{}, 2+nrGames*3)
 
+	isReleaseBuild := func(b string) bool {
+		return strings.HasPrefix(b, "build-")
+	}
+	releaseClient := isReleaseBuild(client.buildId)
+	versionsMatch := func(game *Game) bool {
+		// Its the same version? Of course that works
+		if (game.BuildId() == client.buildId) {
+			return true
+		}
+		// It might work if both are development clients
+		return !releaseClient && !isReleaseBuild(game.BuildId())
+	}
+
 	data[0] = "GAMES"
 	data[1] = nrGames
 	n := 2
@@ -1038,16 +1051,16 @@ func (client *Client) Handle_GAMES(server *Server, pkg *packet.Packet) CmdError 
 		data[n+0] = game.Name()
 		data[n+1] = game.BuildId()
 		if client.protocolVersion == BUILD19 {
-			data[n+2] = !game.UsesRelay() && game.State() == CONNECTABLE
+			data[n+2] = !game.UsesRelay() && game.State() == CONNECTABLE && game.BuildId() == client.buildId
 		} else {
-			if !game.UsesRelay() {
+			if !game.UsesRelay() || !versionsMatch(game) {
 				data[n+2] = "CLOSED"
 			} else if game.State() == CONNECTABLE {
 				data[n+2] = "SETUP"
 			} else if game.State() == RUNNING {
 				data[n+2] = "RUNNING"
 			} else {
-				// For half a second before the host connects to the relay
+				// For half a second before the host of the game connects to the relay
 				data[n+2] = "CLOSED"
 			}
 		}
