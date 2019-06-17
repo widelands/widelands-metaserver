@@ -446,10 +446,14 @@ func (server *Server) GameClosed(name string) {
 // The current status has been requested over RPC
 func (s *Server) Status() *relayinterface.ServerStatus {
 	users := 0
+	clientsInGames := 0
 	for e := s.clients.Front(); e != nil; e = e.Next() {
 		c := e.Value.(*Client)
 		if c.State() == CONNECTED && c.Permissions() != IRC {
 			users++
+			if c.Game() != nil {
+				clientsInGames++
+			}
 		}
 	}
 	games := 0
@@ -463,9 +467,10 @@ func (s *Server) Status() *relayinterface.ServerStatus {
 	}
 
 	return &relayinterface.ServerStatus{
-		NClients:   users,
-		NGames:     games,
-		NOpenGames: openGames,
+		NClients:        users,
+		NClientsInGames: clientsInGames,
+		NGames:          games,
+		NOpenGames:      openGames,
 		}
 }
 

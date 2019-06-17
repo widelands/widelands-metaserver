@@ -1,9 +1,10 @@
 package relayinterface
 
 type ServerStatus struct {
-	NClients   int // does not count IRC users
-	NGames     int // contains nOpenGames
-	NOpenGames int
+	NClients        int // does not count IRC users
+	NClientsInGames int
+	NGames          int // contains nOpenGames
+	NOpenGames      int
 }
 
 // Client is an interface for communicating with the relay server.
