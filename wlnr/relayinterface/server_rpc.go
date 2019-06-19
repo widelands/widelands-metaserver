@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/rpc"
+	"net/rpc/jsonrpc"
 	"time"
 )
 
@@ -43,7 +44,17 @@ func NewServerRPC(callback ServerCallback) Server {
 		log.Printf("Unable to listen on rpc port: %v", e)
 	}
 	server.listener = l
-	go rpc.Accept(l)
+
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				continue
+			}
+			go jsonrpc.ServeConn(conn)
+		}
+	}()
+
 	return server
 }
 
@@ -55,7 +66,7 @@ func (server *ServerRPC) connect() bool {
 		log.Printf("ServerRPC: Unable to connect to metaserver at localhost: %v", err)
 		return false
 	}
-	server.client = rpc.NewClient(connection)
+	server.client = jsonrpc.NewClient(connection)
 	log.Println("ServerRPC: Connected to metaserver")
 	return true
 }
