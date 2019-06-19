@@ -436,7 +436,7 @@ func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
 	switch cmd {
 	case "kick":
 		recv_client := server.HasClient(params)
-		if recv_client != nil {
+		if recv_client != nil && recv_client.permissions != SUPERUSER {
 			server.AddKickedClient(recv_client)
 			recv_client.Disconnect(*server)
 			server.RemoveClient(recv_client)
@@ -451,6 +451,10 @@ func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
 			server.RemoveGame(game)
 			return nil
 		}
+		if recv_client != nil && recv_client.permissions == SUPERUSER {
+			client.SendPacket("CHAT", "", "Kicking admin users is not supported.", "system")
+			return nil
+		}
 		recv_client_irc := server.HasIRCClient(params)
 		if recv_client_irc != nil && recv_client_irc.permissions == IRC {
 			client.SendPacket("CHAT", "", "Kicking IRC users is not supported.", "system")
@@ -463,6 +467,10 @@ func (client *Client) Handle_CMD(server *Server, pkg *packet.Packet) CmdError {
 	case "ban":
 		recv_client := server.HasClient(params)
 		if recv_client != nil {
+			if recv_client.permissions == SUPERUSER {
+				client.SendPacket("CHAT", "", "Banning admin users is not supported.", "system")
+				return nil
+			}
 			server.AddBannedClient(recv_client)
 			recv_client.Disconnect(*server)
 			server.RemoveClient(recv_client)
