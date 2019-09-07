@@ -2,7 +2,7 @@ package main
 
 import (
 	"container/list"
-	"github.com/widelands/widelands_metaserver/wlnr/relayinterface"
+	"github.com/widelands/widelands-metaserver/wlnr/relayinterface"
 	"io"
 	"log"
 	"net"
