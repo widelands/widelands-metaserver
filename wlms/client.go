@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/widelands/widelands_metaserver/wlms/packet"
+	"github.com/widelands/widelands-metaserver/wlms/packet"
 	"log"
 	"net"
 	"reflect"
@@ -784,7 +784,7 @@ func (c *Client) findUnconnectedName(server *Server) {
 		loops++
 		if loops > 1000 {
 			// This code should never be reached but there is an unreproduced bug where this loop
-			// looped forever. See https://github.com/widelands/widelands_metaserver/issues/38
+			// looped forever. See https://github.com/widelands/widelands-metaserver/issues/38
 			log.Printf("ERROR: Tried to find an unused name for client %v but failed 1000 times. This should not happen", baseName)
 			c.Disconnect(*server)
 			return

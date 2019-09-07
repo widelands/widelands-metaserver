@@ -1,4 +1,4 @@
-# widelands_metaserver
+# widelands-metaserver
 
 The game server that provides chat and hosting of games for Widelands.
 
@@ -10,8 +10,8 @@ in the Widelands sources at <https://launchpad.net/widelands>.
 
 1. Install [Go](https://golang.org/doc/install).
 2. `cd $GOPATH`
-3. `go get github.com/widelands/widelands_metaserver/...`
-4. `cd src/github.com/widelands/widelands_metaserver`
+3. `go get github.com/widelands/widelands-metaserver/...`
+4. `cd src/github.com/widelands/widelands-metaserver`
 5. `make`
 
 # Deploying

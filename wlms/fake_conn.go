@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/widelands/widelands_metaserver/wlms/packet"
+	"github.com/widelands/widelands-metaserver/wlms/packet"
 	. "gopkg.in/check.v1"
 	"io"
 	"net"
