@@ -325,6 +325,7 @@ func (client *Client) failedPong(server *Server) {
 			log.Printf("Client %v replaced old client with that name", client.Name())
 			pending := client.pendingLogin
 			pending.userName = client.userName
+			pending.game = client.game
 			server.RemoveClient(client)
 			pending.loginDone(server)
 		}
@@ -766,6 +767,7 @@ func (c *Client) checkCandidates(server *Server) {
 	if oldClient.state == RECENTLY_DISCONNECTED {
 		// Already known as offline
 		c.userName = oldClient.userName
+		c.game = oldClient.game
 		server.RemoveClient(oldClient)
 		c.loginDone(server)
 	} else {
