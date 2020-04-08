@@ -66,6 +66,9 @@ func Read(r io.Reader) (*Packet, error) {
 	if err != nil {
 		return nil, err
 	}
+	if nlen <= 2 {
+		return nil, fmt.Errorf("packet too short")
+	}
 	str, err := readString(r, nlen-2)
 	if err != nil {
 		return nil, err
@@ -139,6 +142,9 @@ func readInt(r io.Reader) (int, error) {
 }
 
 func readString(r io.Reader, nlen int) (string, error) {
+	if nlen <= 0 {
+		return "", fmt.Errorf("length too short")
+	}
 	buf := make([]byte, nlen)
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return "", err
