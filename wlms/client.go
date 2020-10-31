@@ -418,7 +418,11 @@ func (client *Client) Handle_CHAT(server *Server, pkg *packet.Packet) CmdError {
 			}
 			return nil
 		} else {
-			recv_client.SendPacket("CHAT", client.Name(), message, "private")
+			if recv_client != client {
+				// Don't send the message if sender and receiver are the same
+				// A "copy" of this message is generated at the sender anyway
+				recv_client.SendPacket("CHAT", client.Name(), message, "private")
+			}
 		}
 	}
 	return nil
