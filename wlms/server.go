@@ -548,7 +548,9 @@ func CreateServerUsing(acceptedConnections chan ReadWriteCloserWithIp, db UserDb
 }
 
 func (s *Server) mainLoop() {
-	defer s.relay.CloseConnection()
+	if s.relay != nil {
+		defer s.relay.CloseConnection()
+	}
 	// Remove (non-IRC) clients and games that are older than this time.
 	// Normally, I expect this never to remove anything, except for
 	// when bugs / unexpected states make a client/game survive.
