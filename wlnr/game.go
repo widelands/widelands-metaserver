@@ -230,6 +230,9 @@ func (game *Game) handleClientMessages(client *Client) {
 			game.handlePong(client)
 		case kRoundTripTimeRequest:
 			game.sendRTTs(client)
+		default:
+			// Unexpected command, exit
+			game.DisconnectClient(client, "PROTOCOL_VIOLATION")
 		}
 
 	}
@@ -289,6 +292,9 @@ func (game *Game) handleHostMessages() {
 			game.handlePong(game.host)
 		case kRoundTripTimeRequest:
 			game.sendRTTs(game.host)
+		default:
+			// Unexpected command, exit
+			game.DisconnectClient(game.host, "PROTOCOL_VIOLATION")
 		}
 	}
 }
