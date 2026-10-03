@@ -1,5 +1,5 @@
 all:
-	cd ${GOPATH} && go install -v github.com/widelands/widelands-metaserver/...
+	go build -o bin/ ./wlms ./wlnr
 
 cross:
-	cd ${GOPATH} && GOOS=linux go install -v github.com/widelands/widelands-metaserver/...
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/linux_amd64/ ./wlms ./wlnr

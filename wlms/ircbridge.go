@@ -1,10 +1,51 @@
 package main
 
 import (
+	"bytes"
+	"crypto/tls"
 	"github.com/thoj/go-ircevent"
+	"io"
 	"log"
+	"net"
 	"strings"
+	"sync/atomic"
+	"time"
 )
+
+// Bounds for the delay between reconnects to IRC. Variables so that tests can
+// shorten them.
+var (
+	ircReconnectMinDelay = 30 * time.Second
+	ircReconnectMaxDelay = 15 * time.Minute
+)
+
+// reconnectThrottle is the logger of the go-ircevent connection. The
+// library's Loop() logs "Error, disconnected" right before every reconnect but
+// only waits when dialing fails. A server that accepts the TCP connection and
+// then refuses it (failed TLS handshake, connection throttling) is therefore
+// hammered in a tight loop, which gets our host throttled even longer. Waiting
+// in Write() at that point adds an exponential backoff. The goroutines of the
+// old connection have already stopped then, so nothing else is blocked.
+type reconnectThrottle struct {
+	out   io.Writer
+	delay time.Duration
+	// Set once a connection got registered on the IRC server, which resets
+	// the backoff for the next disconnect.
+	registered atomic.Bool
+}
+
+func (t *reconnectThrottle) Write(p []byte) (int, error) {
+	n, err := t.out.Write(p)
+	if bytes.Contains(p, []byte("Error, disconnected")) {
+		if t.registered.Swap(false) || t.delay == 0 {
+			t.delay = ircReconnectMinDelay
+		}
+		log.Printf("Reconnecting to IRC in %v", t.delay)
+		time.Sleep(t.delay)
+		t.delay = min(2*t.delay, ircReconnectMaxDelay)
+	}
+	return n, err
+}
 
 // Structure with channels for communication between IRCBridger and the metaserver
 type IRCBridgerChannels struct {
@@ -42,13 +83,13 @@ type Message struct {
 	message, nick string
 }
 
-func NewIRCBridge(server, realname, nickname, channel string, tls bool) *IRCBridge {
+func NewIRCBridge(server, realname, nickname, channel string, useTLS bool) *IRCBridge {
 	return &IRCBridge{
 		server:  server,
 		user:    realname,
 		nick:    nickname,
 		channel: channel,
-		useTLS:  tls,
+		useTLS:  useTLS,
 	}
 }
 
@@ -65,7 +106,18 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 	}
 	//Set options
 	bridge.connection.UseTLS = bridge.useTLS
-	//connection.TLSOptions //set ssl options
+	throttle := &reconnectThrottle{out: log.Writer()}
+	bridge.connection.Log = log.New(throttle, "", log.LstdFlags)
+	if bridge.useTLS {
+		// go-ircevent wraps the dialed connection with tls.Client(), which does
+		// not derive the server name from the address. Without it every
+		// handshake fails and the library reconnects in a tight loop.
+		host, _, err := net.SplitHostPort(bridge.server)
+		if err != nil {
+			log.Fatalf("Invalid IRC server address %s: %v", bridge.server, err)
+		}
+		bridge.connection.TLSConfig = &tls.Config{ServerName: host}
+	}
 	//connection.Password = "[server password]"
 	//Commands
 	err := bridge.connection.Connect(bridge.server) //Connect to server
@@ -74,6 +126,7 @@ func (bridge *IRCBridge) Connect(channels *IRCBridgerChannels) bool {
 		return false
 	}
 	bridge.connection.AddCallback("001", func(e *irc.Event) {
+		throttle.registered.Store(true)
 		bridge.connection.Join(bridge.channel)
 		// HACK: This will start a new goroutine each time we connect to the IRC server.
 		// Unfortunately, on connection loss Privmsg() will store a few messages inside a
