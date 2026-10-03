@@ -1,7 +1,10 @@
 package main
 
 const (
-	kRelayProtocolVersion uint8 = 1
+	kRelayProtocolVersion uint8 = 2
+	// Build 20 contains a bug that the password is sent twice.
+	// Apart from that, the relay protocol versions are the same
+	kRelayProtocolVersionBuild20 uint8 = 1
 
 	// The commands used in the protocol
 	// The names match the names in the Widelands sources

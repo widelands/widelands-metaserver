@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-const PING_INTERVAL_S = 90
-
 // Structure to bundle the TCP connection with its packet buffer
 type Client struct {
 	// The TCP connection to the client
@@ -57,7 +55,7 @@ func New(conn net.Conn) *Client {
 		id:              0,
 		reader:          bufio.NewReader(conn),
 		chan_out:        make(chan *Command),
-		pingTimer:       time.NewTimer(time.Second * 1), // Do the next ping now
+		pingTimer:       time.NewTimer(time.Second * 1),
 		waitingForPong:  false,
 		lastSendPingSeq: 0,
 		timeLastPing:    time.Now(),
@@ -106,11 +104,6 @@ func (c *Client) ReadPacket() ([]byte, error) {
 	packet[0] = length_bytes[0]
 	packet[1] = length_bytes[1]
 	_, error = io.ReadFull(c.reader, packet[2:])
-	// TODO(Notabilis): Think about this (and similar places). The client might be able
-	// to keep the server waiting here. Actually, he can simply keep the connection
-	// idling anyway. Is this a problem? Might be a possibility for DoS.
-	// Is there a ping in the GameHost code? Won't help before a game is assigned
-	// to the client, though. So probably add some fast disconnect on idle.
 	return packet, error
 }
 
@@ -149,14 +142,24 @@ func (c *Client) pingLoop() {
 			cmd := NewCommand(kPing)
 			cmd.AppendUInt(c.lastSendPingSeq)
 			c.SendCommand(cmd)
-			c.pingTimer.Reset(time.Second * PING_INTERVAL_S)
+			c.pingTimer.Reset(time.Second * 1)
 		} else {
-			// Bad luck: We got no response so disconnect client
-			// In the case of the game host this also takes down the game
-			// by closing the socket -> game will notice it and abort
-			log.Printf("Timeout of client (id=%v), disconnecting", c.id)
-			c.Disconnect("TIMEOUT")
-			break
+			// If it is over 90 seconds since the last received PONG,
+			// the client is hanging for too long and we disconnect it.
+			// Normally we should receive a PONG every second, but for build20
+			// clients this might be delayed when loading maps
+			if time.Now().After(c.timeLastPong.Add(time.Second * 90)) {
+				// Bad luck: We got no response for too long so disconnect client
+				// In the case of the game host this also takes down the game
+				// by closing the socket -> game will notice it and abort
+				log.Printf("Timeout of client (id=%v), disconnecting", c.id)
+				c.Disconnect("TIMEOUT")
+				break
+			} else {
+				// We are using TCP, so Pings can't get lost.
+				// Just wait for some more time
+				c.pingTimer.Reset(time.Second * 1)
+			}
 		}
 	}
 }
@@ -164,11 +167,8 @@ func (c *Client) pingLoop() {
 func (c *Client) HandlePong(seq uint8) {
 	c.waitingForPong = false
 	if seq != c.lastSendPingSeq {
-		// Well, actually the sequence numbers are not that important.
-		// The client will be disconnected when he fails to respond in time,
-		// so there should never be two pings open at the same time.
-		// Could become important if we add, e.g., fast pings to check
-		// whether a certain client is active.
+		// Well, actually the sequence numbers are not that important,
+		// as there should never be two pings open at the same time.
 		// Use the sequence number anyway so we don't mess up our
 		// measurements when we get a pong too much
 		return

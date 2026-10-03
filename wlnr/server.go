@@ -161,7 +161,7 @@ func (s *Server) dealWithNewConnection(client *Client) {
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
-	if version != kRelayProtocolVersion {
+	if version != kRelayProtocolVersion && version != kRelayProtocolVersionBuild20 {
 		client.Disconnect("WRONG_VERSION")
 		return
 	}
@@ -176,6 +176,14 @@ func (s *Server) dealWithNewConnection(client *Client) {
 		client.Disconnect("PROTOCOL_VIOLATION")
 		return
 	}
+
+	if version == kRelayProtocolVersionBuild20 && password != "client" {
+		// Build 20 contains a bug that the password is sent twice by the host.
+		// Apart from that, the relay protocol versions are the same.
+		// Receive and discard the useless second password
+		client.ReadString()
+	}
+
 	// The game will handle the client
 	for e := s.games.Front(); e != nil; e = e.Next() {
 		game := e.Value.(*Game)
