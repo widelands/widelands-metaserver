@@ -1,8 +1,12 @@
 package main
 
 import (
+	"container/list"
+	"crypto/sha1"
+	"encoding/hex"
 	"github.com/widelands/widelands-metaserver/wlms/packet"
 	. "gopkg.in/check.v1"
+	"io"
 	"log"
 	"testing"
 	"time"
@@ -28,11 +32,21 @@ func ExpectClosed(c *C, f FakeConn) {
 	c.Assert(f.GotClosed(), Equals, true)
 }
 
+type FakeRelay struct{}
+
+func (r FakeRelay) CreateGame(name string, password string) bool { return true }
+func (r FakeRelay) RemoveGame(name string) bool                  { return true }
+func (r FakeRelay) CloseConnection()                             {}
+
 func SetupServer(c *C, nClients int) (*Server, []FakeConn) {
 	log.SetFlags(log.Lshortfile)
 	db := NewInMemoryDb()
 	db.AddUser("SirVer", "123456", SUPERUSER)
 	db.AddUser("otto", "ottoiscool", REGISTERED)
+	db.AddUser("inactive", "inactivepw", REGISTERED)
+	db.SetAccountStatus("inactive", false, false)
+	db.AddUser("deleted", "deletedpw", REGISTERED)
+	db.SetAccountStatus("deleted", true, true)
 
 	acceptingConnections := make(chan ReadWriteCloserWithIp, 20)
 	cons := make([]FakeConn, nClients)
@@ -41,11 +55,27 @@ func SetupServer(c *C, nClients int) (*Server, []FakeConn) {
 		acceptingConnections <- cons[i]
 	}
 
-	//irc := NewIRCBridge("chat.freenode.net:7000", "wltest", "wltest", "#widelands-test", true)
-	toIrc := make(chan Message, 100)
-	fromIrc := make(chan Message, 100)
-	//irc.Connect(toIrc, fromIrc)
-	return CreateServerUsing(acceptingConnections, db, fromIrc, toIrc), cons
+	// Not CreateServerUsing(): that resolves the own hostname and needs a running relay.
+	server := &Server{
+		acceptedConnections:    acceptingConnections,
+		shutdownServer:         make(chan bool),
+		serverHasShutdown:      make(chan bool),
+		clients:                list.New(),
+		games:                  list.New(),
+		user_db:                db,
+		gameInitialPingTimeout: time.Second * 10,
+		gamePingTimeout:        time.Second * 30,
+		pingCycleTime:          time.Second * 15,
+		clientSendingTimeout:   time.Minute * 2,
+		clientForgetTimeout:    time.Minute * 5,
+		irc:                    NewIRCBridgerChannels(),
+		relay:                  FakeRelay{},
+		relay_address:          AddressPair{"127.0.0.1", "::1"},
+		banned:                 list.New(),
+	}
+	server.gamePingerFactory = RealGamePingerFactory{server}
+	go server.mainLoop()
+	return server, cons
 }
 
 type Matching string
@@ -75,28 +105,54 @@ func ExpectPacketForAll(c *C, clients []FakeConn, expected ...interface{}) {
 	}
 }
 
+// Answers a PWD_CHALLENGE like the game client does: hex(sha1(challenge + hex(sha1(password)))).
+func AnswerPasswordChallenge(c *C, f FakeConn, password string) {
+	timer := time.NewTimer(20 * time.Millisecond)
+	select {
+	case pkg := <-f.Packets:
+		c.Assert(pkg.RawData, HasLen, 2)
+		c.Assert(pkg.RawData[0], Equals, "PWD_CHALLENGE")
+		passwordHash := sha1.Sum([]byte(password))
+		h := sha1.New()
+		io.WriteString(h, pkg.RawData[1])
+		io.WriteString(h, hex.EncodeToString(passwordHash[:]))
+		SendPacket(f, "PWD_CHALLENGE", hex.EncodeToString(h.Sum(nil)))
+	case <-timer.C:
+		c.Fatalf("No PWD_CHALLENGE arrived, though we expected one.")
+	}
+}
+
+// A login sends TIME before the client is added to the server; let that finish.
+func WaitForLoginToFinish() {
+	time.Sleep(5 * time.Millisecond)
+}
+
+// The CLIENTS_UPDATE broadcast for a new client follows after ANNOUNCE_DELAY.
 func ExpectLoginAsUnregisteredWorks(c *C, f FakeConn, name string) {
-	SendPacket(f, "LOGIN", 0, name, "build-16", false)
+	SendPacket(f, "LOGIN", BUILD21, name, "build-16", false, "nonce-"+name)
 	ExpectPacket(c, f, "LOGIN", name, "UNREGISTERED")
 	ExpectPacket(c, f, "TIME", Matching("\\d+"))
-	ExpectPacket(c, f, "CLIENTS_UPDATE")
+	WaitForLoginToFinish()
+}
+
+func ExpectRegisteredLoginWorks(c *C, f FakeConn, name, buildId, password, permissions string) {
+	SendPacket(f, "LOGIN", BUILD21, name, buildId, true, "nonce-"+name)
+	AnswerPasswordChallenge(c, f, password)
+	ExpectPacket(c, f, "LOGIN", name, permissions)
+	ExpectPacket(c, f, "TIME", Matching("\\d+"))
+	WaitForLoginToFinish()
 }
 
 func ExpectLoginAsOttoWorks(c *C, f FakeConn) {
-	SendPacket(f, "LOGIN", 0, "otto", "build-17", true, "ottoiscool")
-	ExpectPacket(c, f, "LOGIN", "otto", "REGISTERED")
-	ExpectPacket(c, f, "TIME", Matching("\\d+"))
-	ExpectPacket(c, f, "CLIENTS_UPDATE")
+	ExpectRegisteredLoginWorks(c, f, "otto", "build-17", "ottoiscool", "REGISTERED")
 }
 
 func ExpectLoginAsSirVerWorks(c *C, f FakeConn) {
-	SendPacket(f, "LOGIN", 0, "SirVer", "build-18", true, "123456")
-	ExpectPacket(c, f, "LOGIN", "SirVer", "SUPERUSER")
-	ExpectPacket(c, f, "TIME", Matching("\\d+"))
-	ExpectPacket(c, f, "CLIENTS_UPDATE")
+	ExpectRegisteredLoginWorks(c, f, "SirVer", "build-18", "123456", "SUPERUSER")
 }
 
 func ExpectServerToShutdownCleanly(c *C, server *Server) {
+	WaitForLoginToFinish()
 	server.InitiateShutdown()
 	server.WaitTillShutdown()
 	c.Assert(server.NrActiveClients(), Equals, 0)
@@ -138,8 +194,9 @@ func (p *EndToEndSuite) TestFragmentedPackets(c *C) {
 func (s *EndToEndSuite) TestRegisteredUserIncorrectPassword(c *C) {
 	server, clients := SetupServer(c, 2)
 
-	SendPacket(clients[0], "LOGIN", 0, "SirVer", "build-18", true, "23456")
-	ExpectPacket(c, clients[0], "ERROR", "LOGIN", "WRONG_PASSWORD")
+	SendPacket(clients[0], "LOGIN", BUILD21, "SirVer", "build-18", true, "nonce")
+	AnswerPasswordChallenge(c, clients[0], "23456")
+	ExpectPacket(c, clients[0], "ERROR", "PWD_CHALLENGE", "WRONG_PASSWORD")
 
 	ExpectServerToShutdownCleanly(c, server)
 }
@@ -147,8 +204,27 @@ func (s *EndToEndSuite) TestRegisteredUserIncorrectPassword(c *C) {
 func (s *EndToEndSuite) TestRegisteredUserNotExisting(c *C) {
 	server, clients := SetupServer(c, 2)
 
-	SendPacket(clients[0], "LOGIN", 0, "bluba", "build-16", true, "123456")
+	SendPacket(clients[0], "LOGIN", BUILD21, "bluba", "build-16", true, "nonce")
 	ExpectPacket(c, clients[0], "ERROR", "LOGIN", "WRONG_PASSWORD")
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
+func (s *EndToEndSuite) TestInactiveOrDeletedUserCannotLogIn(c *C) {
+	server, clients := SetupServer(c, 4)
+
+	// Refused before a challenge is sent, so the correct password does not help.
+	SendPacket(clients[0], "LOGIN", BUILD21, "inactive", "build-18", true, "nonce0")
+	ExpectPacket(c, clients[0], "ERROR", "LOGIN", "WRONG_PASSWORD")
+	SendPacket(clients[1], "LOGIN", BUILD21, "deleted", "build-18", true, "nonce1")
+	ExpectPacket(c, clients[1], "ERROR", "LOGIN", "WRONG_PASSWORD")
+	SendPacket(clients[2], "CHECK_PWD", BUILD21, "inactive", "build-18")
+	ExpectPacket(c, clients[2], "ERROR", "CHECK_PWD", "WRONG_PASSWORD")
+
+	// The name stays reserved for its owner.
+	SendPacket(clients[3], "LOGIN", BUILD21, "deleted", "build-18", false, "nonce3")
+	ExpectPacket(c, clients[3], "LOGIN", "deleted1", "UNREGISTERED")
+	ExpectPacket(c, clients[3], "TIME", Matching("\\d+"))
 
 	ExpectServerToShutdownCleanly(c, server)
 }
@@ -156,11 +232,10 @@ func (s *EndToEndSuite) TestRegisteredUserNotExisting(c *C) {
 func (s *EndToEndSuite) TestLoginAnonymouslyWorks(c *C) {
 	server, clients := SetupServer(c, 1)
 
-	SendPacket(clients[0], "LOGIN", 0, "testuser", "build-16", false)
+	SendPacket(clients[0], "LOGIN", BUILD21, "testuser", "build-16", false, "nonce")
 
 	ExpectPacket(c, clients[0], "LOGIN", "testuser", "UNREGISTERED")
 	ExpectPacket(c, clients[0], "TIME", Matching("\\d+"))
-	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 	clients[0].Close()
 
 	time.Sleep(5 * time.Millisecond)
@@ -182,13 +257,27 @@ func (s *EndToEndSuite) TestLoginUnknownProtocol(c *C) {
 	ExpectServerToShutdownCleanly(c, server)
 }
 
+func (s *EndToEndSuite) TestLoginBuild19Unsupported(c *C) {
+	server, clients := SetupServer(c, 2)
+
+	SendPacket(clients[0], "LOGIN", BUILD19, "testuser", "build-19", false)
+	ExpectPacket(c, clients[0], "ERROR", "LOGIN", "UNSUPPORTED_PROTOCOL")
+	// Build 19 sends the plain text password.
+	SendPacket(clients[1], "LOGIN", BUILD19, "SirVer", "build-19", true, "123456")
+	ExpectPacket(c, clients[1], "ERROR", "LOGIN", "UNSUPPORTED_PROTOCOL")
+
+	time.Sleep(5 * time.Millisecond)
+	c.Assert(server.NrActiveClients(), Equals, 0)
+
+	ExpectServerToShutdownCleanly(c, server)
+}
+
 func (s *EndToEndSuite) TestLoginWithKnownUserName(c *C) {
 	server, clients := SetupServer(c, 1)
 
-	SendPacket(clients[0], "LOGIN", 0, "SirVer", "build-18", false)
+	SendPacket(clients[0], "LOGIN", BUILD21, "SirVer", "build-18", false, "nonce")
 	ExpectPacket(c, clients[0], "LOGIN", "SirVer1", "UNREGISTERED")
 	ExpectPacket(c, clients[0], "TIME", Matching("\\d+"))
-	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 
 	ExpectServerToShutdownCleanly(c, server)
 }
@@ -198,12 +287,9 @@ func (s *EndToEndSuite) TestLoginOneWasAlreadyThere(c *C) {
 
 	ExpectLoginAsUnregisteredWorks(c, clients[0], "testuser")
 
-	SendPacket(clients[1], "LOGIN", 0, "testuser", "build-16", false)
+	SendPacket(clients[1], "LOGIN", BUILD21, "testuser", "build-16", false, "other-nonce")
 	ExpectPacket(c, clients[1], "LOGIN", "testuser1", "UNREGISTERED")
 	ExpectPacket(c, clients[1], "TIME", Matching("\\d+"))
-	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
-
-	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
 
 	ExpectServerToShutdownCleanly(c, server)
 }
@@ -211,28 +297,8 @@ func (s *EndToEndSuite) TestLoginOneWasAlreadyThere(c *C) {
 func (s *EndToEndSuite) TestRegisteredUserCorrectPassword(c *C) {
 	server, clients := SetupServer(c, 2)
 
-	SendPacket(clients[0], "LOGIN", 0, "SirVer", "build-18", true, "123456")
-	ExpectPacket(c, clients[0], "LOGIN", "SirVer", "SUPERUSER")
-	ExpectPacket(c, clients[0], "TIME", Matching("\\d+"))
-	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
-
-	SendPacket(clients[1], "LOGIN", 0, "otto", "build-17", true, "ottoiscool")
-	ExpectPacket(c, clients[1], "LOGIN", "otto", "REGISTERED")
-	ExpectPacket(c, clients[1], "TIME", Matching("\\d+"))
-	ExpectPacket(c, clients[1], "CLIENTS_UPDATE")
-
-	ExpectPacket(c, clients[0], "CLIENTS_UPDATE")
-
-	ExpectServerToShutdownCleanly(c, server)
-}
-
-func (s *EndToEndSuite) TestRegisteredUserAlreadyLoggedIn(c *C) {
-	server, clients := SetupServer(c, 2)
-
 	ExpectLoginAsSirVerWorks(c, clients[0])
-
-	SendPacket(clients[1], "LOGIN", 0, "SirVer", "build-18", true, "123456")
-	ExpectPacket(c, clients[1], "ERROR", "LOGIN", "ALREADY_LOGGED_IN")
+	ExpectLoginAsOttoWorks(c, clients[1])
 
 	ExpectServerToShutdownCleanly(c, server)
 }
@@ -683,7 +749,7 @@ type FakeGamePingerFactory struct {
 	pinger GamePinger
 }
 
-func (f FakeGamePingerFactory) New(client *Client, timeout time.Duration) *GamePinger {
+func (f FakeGamePingerFactory) New(ip string, timeout time.Duration) *GamePinger {
 	return &f.pinger
 }
 
@@ -1030,10 +1096,9 @@ func (s *EndToEndSuite) TestGameLeavingNotInGame(c *C) {
 
 func (s *EndToEndSuite) TestIRCBridge(c *C) {
 	var ircbridge = NewIRCBridge("chat.freenode.net:7000", "IRCTest", "IRCTest", "widelands-test", true)
-	messagesToIrc := make(chan Message, 50)
-	messagesToLobby := make(chan Message, 50)
-	ircbridge.Connect(messagesToIrc, messagesToLobby)
-	messagesToIrc <- Message{
+	channels := NewIRCBridgerChannels()
+	ircbridge.Connect(channels)
+	channels.messagesToIRC <- Message{
 		nick:    "Test",
 		message: "Hello",
 	}

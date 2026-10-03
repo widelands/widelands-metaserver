@@ -54,8 +54,9 @@ const (
 )
 
 func isSupportedVersion(version int) bool {
+	// BUILD19 is no longer supported: it sends the password in plain text.
 	switch version {
-	case BUILD19, BUILD20, BUILD21:
+	case BUILD20, BUILD21:
 		return true
 	}
 	return false
@@ -580,13 +581,11 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 		return CriticalCmdPacketError{"UNSUPPORTED_PROTOCOL"}
 	}
 
-	if isRegisteredOnServer || c.protocolVersion >= BUILD20 {
-		nonce, err := pkg.ReadString()
-		if err != nil {
-			return CriticalCmdPacketError{err.Error()}
-		}
-		c.nonce = nonce
+	nonce, err := pkg.ReadString()
+	if err != nil {
+		return CriticalCmdPacketError{err.Error()}
 	}
+	c.nonce = nonce
 
 	// Check if the user has been banned
 	if server.IsBannedClient(c) {
@@ -602,15 +601,8 @@ func (c *Client) Handle_LOGIN(server *Server, pkg *packet.Packet) CmdError {
 		if !server.UserDb().ContainsName(c.userName) {
 			return CriticalCmdPacketError{"WRONG_PASSWORD"}
 		}
-		if c.protocolVersion >= BUILD20 {
-			// Send a challenge for secure passwort transmission
-			c.sendChallenge(server)
-			return nil
-		}
-		failed := c.checkCredentialsLegacy(server)
-		if failed != nil {
-			return failed
-		}
+		// Send a challenge for secure passwort transmission
+		return c.sendChallenge(server)
 	}
 	return c.findReplaceCandidates(server, isRegisteredOnServer)
 }
@@ -635,22 +627,24 @@ func (c *Client) Handle_CHECK_PWD(server *Server, pkg *packet.Packet) CmdError {
 		return CriticalCmdPacketError{"WRONG_PASSWORD"}
 	}
 	// Send a challenge for secure passwort transmission
-	c.sendChallenge(server)
+	if err := c.sendChallenge(server); err != nil {
+		return err
+	}
 	c.state = CHECK_PWD
 	return nil
 }
 
-func (c *Client) sendChallenge(server *Server) {
+func (c *Client) sendChallenge(server *Server) CmdError {
 	// The nonce is empty when using challenge-response. Use it to store the response
 	var challenge string
 	var success bool
 	challenge, c.expectedResponse, success = server.UserDb().GenerateChallengeResponsePairFromUsername(c.userName)
 	if !success {
-		// Should not happen, but who knows
-		c.Disconnect(*server)
-		return
+		// No password set, or the website account is inactive or deleted
+		return CriticalCmdPacketError{"WRONG_PASSWORD"}
 	}
 	c.SendPacket("PWD_CHALLENGE", challenge)
+	return nil
 }
 
 func (c *Client) Handle_PWD_CHALLENGE(server *Server, pkg *packet.Packet) CmdError {
@@ -675,15 +669,6 @@ func (c *Client) Handle_PWD_CHALLENGE(server *Server, pkg *packet.Packet) CmdErr
 		c.SendPacket("ERROR", "PWD_CHALLENGE", "Invalid connection state")
 		c.Disconnect(*server)
 	}
-	return nil
-}
-
-func (c *Client) checkCredentialsLegacy(server *Server) CmdError {
-	if !server.UserDb().PasswordCorrect(c.userName, c.nonce) {
-		return CriticalCmdPacketError{"WRONG_PASSWORD"}
-	}
-	c.permissions = server.UserDb().Permissions(c.userName)
-	// Everything fine
 	return nil
 }
 
