@@ -7,15 +7,6 @@ import (
 	"net"
 )
 
-type FakeAddr struct{}
-
-func (a FakeAddr) Network() string {
-	return "TestingNetwork"
-}
-func (a FakeAddr) String() string {
-	return "192.168.0.0:1234"
-}
-
 type FakeConn struct {
 	Packets         chan *packet.Packet
 	sendData_Reader *io.PipeReader
@@ -75,5 +66,5 @@ func (f FakeConn) Close() error {
 }
 
 func (f FakeConn) RemoteAddr() net.Addr {
-	return FakeAddr{}
+	return &net.TCPAddr{IP: net.IPv4(192, 168, 0, 0), Port: 1234}
 }
